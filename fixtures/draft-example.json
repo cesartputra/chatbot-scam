@@ -1,0 +1,42 @@
+{
+  "schema_version": "poc-0.1",
+  "mode": "DRAFT_ONLY",
+  "submitted": false,
+  "identity_verified": false,
+  "user_reviewed": true,
+  "generated_at": "2026-10-20T22:44:40.233737+07:00",
+  "data": {
+    "pelapor_nama": "PELAPOR DUMMY",
+    "pelapor_email": "pelapor.dummy@example.com",
+    "pelapor_telepon": "080000000000",
+    "pelapor_nik": "0000000000000000",
+    "pelapor_alamat": null,
+    "terlapor_nama": "TERLAPOR DUMMY",
+    "terlapor_kontak": null,
+    "kategori_modus": "BELANJA_ONLINE",
+    "kronologi": "DATA DUMMY: Saya memesan barang di situs contoh, lalu melakukan transfer fiktif. Barang dalam skenario ini tidak diterima. Tidak ada kejadian nyata.",
+    "bank_pengirim": "BANK DEMO A",
+    "rekening_pengirim": "0000000000",
+    "bank_penerima": "BANK DEMO B",
+    "rekening_penerima": "0000000001",
+    "nominal": 150000,
+    "waktu_transaksi": "2026-10-19T10:00:00+07:00",
+    "rrn": "000000000001"
+  },
+  "sources": {
+    "bank_pengirim": "ocr",
+    "rekening_pengirim": "ocr",
+    "bank_penerima": "ocr",
+    "rekening_penerima": "ocr",
+    "terlapor_nama": "ocr",
+    "nominal": "manual",
+    "waktu_transaksi": "ocr",
+    "rrn": "ocr",
+    "pelapor_nama": "chat",
+    "pelapor_email": "chat",
+    "pelapor_telepon": "chat",
+    "pelapor_nik": "chat",
+    "kategori_modus": "chat",
+    "kronologi": "chat"
+  }
+}

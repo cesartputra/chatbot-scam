@@ -1,0 +1,122 @@
+{
+  "schema_version": "local-replica-0.2",
+  "id": "SIM-MVGVQ3RG-3945DB",
+  "generated_at": "2026-10-20T16:10:07.372Z",
+  "simulated": true,
+  "submitted": false,
+  "data": {
+    "pelapor": {
+      "sendiri": "ya",
+      "jenis_kelamin": "Laki-laki",
+      "kewarganegaraan": "Indonesia",
+      "kode_telepon": "+62",
+      "konfirmasi_kode_telepon": "+62",
+      "nama": "PELAPOR DUMMY PENGUJIAN",
+      "tempat_lahir": "Kota Dummy",
+      "tanggal_lahir": "1990-10-01",
+      "agama": "Tidak Diketahui",
+      "pekerjaan": "Penguji Dummy",
+      "telepon": "80000000000",
+      "konfirmasi_telepon": "80000000000",
+      "email": "pelapor.dummy@example.com",
+      "konfirmasi_email": "pelapor.dummy@example.com",
+      "jenis_identitas": "KTP",
+      "nomor_identitas": "0000000000000000",
+      "provinsi": "DKI Jakarta",
+      "kota": "Kota Adm. Jakarta Pusat",
+      "alamat": "Alamat dummy untuk pengujian formulir, bukan alamat orang nyata."
+    },
+    "korban": {
+      "nama": "",
+      "identitas": "",
+      "hubungan": ""
+    },
+    "files": {
+      "identitas": {
+        "name": "lampiran-dummy.png",
+        "size": 73193,
+        "type": "image/png"
+      },
+      "kejadian": {
+        "name": "lampiran-dummy.png",
+        "size": 73193,
+        "type": "image/png"
+      },
+      "rekening": {
+        "name": "lampiran-dummy.png",
+        "size": 73193,
+        "type": "image/png"
+      }
+    },
+    "terlapor": [
+      {
+        "kode": "+62",
+        "nomor": "80000000001",
+        "nama": "TERLAPOR DUMMY - BUKAN ORANG NYATA",
+        "file": {
+          "name": "lampiran-dummy.png",
+          "size": 73193,
+          "type": "image/png"
+        }
+      },
+      {
+        "kode": "+62",
+        "nomor": "80000000002",
+        "nama": "TERLAPOR DUMMY KEDUA",
+        "file": {
+          "name": "bukti-dummy.png",
+          "size": 73193,
+          "type": "image/png"
+        }
+      }
+    ],
+    "media": [
+      {
+        "sumber": "Website",
+        "detail": "https://example.com/dummy-test - DATA FIKTIF",
+        "file": {
+          "name": "lampiran-dummy.png",
+          "size": 73193,
+          "type": "image/png"
+        }
+      }
+    ],
+    "kejadian": {
+      "tanggal": "2026-10-19T10:00",
+      "kronologi": "DATA DUMMY UNTUK PENGUJIAN. Pada 19 Oktober 2026, pelapor melakukan transfer fiktif untuk penawaran barang contoh. Tidak ada kejadian atau tuduhan nyata."
+    },
+    "transaksi": {
+      "bank": "BNI",
+      "rekening": "0000000000",
+      "nama": "PEMILIK REKENING DUMMY",
+      "penerima": [
+        {
+          "bank": "BCA",
+          "rekening": "0000000001",
+          "nama": "TERLAPOR DUMMY - FIKTIF",
+          "details": [
+            {
+              "waktu": "2026-10-19T10:00",
+              "nominal": 100000,
+              "file": {
+                "name": "lampiran-dummy.png",
+                "size": 73193,
+                "type": "image/png"
+              }
+            },
+            {
+              "waktu": "2026-10-19T10:30",
+              "nominal": 200000,
+              "file": {
+                "name": "bukti-dummy.png",
+                "size": 73193,
+                "type": "image/png"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "reviewed": true
+  }
+}

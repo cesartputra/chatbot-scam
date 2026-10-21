@@ -1,0 +1,8 @@
+fastapi==0.153.0
+uvicorn==0.54.0
+pydantic==2.14.1
+httpx==0.28.1
+Pillow==13.0.0
+python-multipart==0.0.32
+email-validator==2.3.0
+python-dotenv==1.2.4

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>IASC Intake Lab — Asisten laporan</title>
+  <meta name="description" content="Prototipe asisten pengisian laporan: baca bukti, lengkapi data, tinjau draft. Tanpa pengiriman ke IASC.">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="/" aria-label="Beranda Intake Lab"><span class="brand-mark">i<span>↗</span></span><span>IASC <b>Intake Lab</b><small>ASISTEN PELAPORAN · PROTOTIPE</small></span></a><div class="top-actions"><span class="status"><i></i><span id="engine">Memuat layanan…</span></span><a class="integration-link" href="/integration">Demo widget <span>↗</span></a></div></header>
+  <main>
+    <section class="intro"><div><div class="eyebrow"><span></span> BUKTI DAHULU, CERITA KEMUDIAN</div><h1>Satu bukti. <em>Langkah lebih ringan.</em></h1><p>Unggah bukti transfer, lalu lengkapi yang belum terbaca.<br>Anda tetap memegang kendali atas setiap data.</p></div><aside class="sandbox-note"><span class="lab-icon">⌁</span><div><b>Ruang simulasi</b><p>Gunakan data dummy. Tidak terhubung<br>ke pengiriman laporan IASC.</p></div></aside></section>
+    <nav class="phases" aria-label="Tahap pengisian"><ol id="phases"></ol></nav>
+    <section class="workspace">
+      <article class="chat-panel">
+        <header class="panel-head"><div class="assistant-avatar">✳</div><div><h2>Asisten laporan</h2><p id="assistant-mode" role="status">Membantu menyusun data Anda</p></div><span class="private-tag">◈ Sesi sementara</span></header>
+        <div id="chat" class="chat-log" role="log" aria-live="polite" aria-label="Percakapan laporan"></div>
+        <div id="quick-replies" class="quick-replies"></div>
+        <div id="error" class="error" role="alert" hidden></div>
+        <form id="composer" class="composer"><label class="upload-button" title="Unggah bukti transfer"><input type="file" id="evidence-input" accept="image/png,image/jpeg,image/webp"><span aria-hidden="true">＋</span><span class="sr-only">Unggah bukti transfer</span></label><label class="sr-only" for="message">Jawaban Anda</label><textarea id="message" rows="1" maxlength="4000" placeholder="Tulis jawaban Anda…"></textarea><button type="submit" id="send" aria-label="Kirim jawaban ke sesi lokal">↑</button></form>
+        <footer class="chat-footer"><span id="privacy-note">Bukti diproses lokal · gambar dihapus setelah OCR</span><button id="reset" class="text-button">Mulai ulang</button></footer>
+        <button id="apply-host" class="secondary" hidden>Terapkan ke formulir lokal ↗</button>
+      </article>
+      <aside class="summary-panel">
+        <header class="summary-head"><div><div class="eyebrow">DRAFT ANDA</div><h2>Susun, periksa, simpan.</h2></div><span class="draft-pill">Belum dikirim</span></header>
+        <div class="completion"><div><span>Data inti terisi</span><b id="progress-text">0 / 13</b></div><progress id="progress" max="13" value="0" aria-label="Kelengkapan data inti"></progress></div>
+        <div class="summary-tabs" role="tablist" aria-label="Tampilan draft"><button role="tab" id="tab-data" data-tab="data" aria-selected="true" aria-controls="data-view">Ringkasan</button><button role="tab" id="tab-evidence" data-tab="evidence" aria-selected="false" aria-controls="evidence-view">Bukti <span id="evidence-count">0</span></button><button role="tab" id="tab-json" data-tab="json" aria-selected="false" aria-controls="json-view">JSON</button></div>
+        <section id="data-view" role="tabpanel" aria-labelledby="tab-data"><div id="field-list"></div></section>
+        <section id="evidence-view" role="tabpanel" aria-labelledby="tab-evidence" hidden><div class="evidence-empty" id="evidence-empty"><span>▧</span><b>Mulai dari bukti transfer</b><p>PNG, JPG, atau WebP · maksimal 3 MB.<br>Hasil OCR selalu perlu diperiksa.</p><button id="upload-secondary" class="secondary">Pilih gambar</button></div><div id="evidence-result" hidden><img id="evidence-preview" alt="Pratinjau bukti yang dipilih"><p class="review-notice">Periksa nomor rekening, nominal, dan waktu dengan gambar asli.</p><details><summary>Teks yang terbaca</summary><pre id="ocr-text"></pre></details></div></section>
+        <section id="json-view" role="tabpanel" aria-labelledby="tab-json" hidden><p class="json-caption">Payload draft · skema PoC, bukan kontrak API resmi IASC.</p><pre id="json-output"></pre></section>
+        <div class="draft-actions"><p id="review-help">Lengkapi data inti untuk meninjau draft.</p><label class="review-check"><input type="checkbox" id="reviewed" disabled><span>Saya sudah memeriksa data dummy ini.</span></label><button id="download" class="primary" disabled>Unduh draft JSON <span>↓</span></button><p class="no-submit">Draft hanya diunduh. Tidak ada laporan yang dikirim.</p></div>
+      </aside>
+    </section>
+    <footer class="page-footer"><span>IASC Intake Lab <span class="muted">/</span> Proof of Concept 0.1</span><span>OCR → percakapan → tinjauan manusia</span></footer>
+  </main>
+  <dialog id="edit-dialog"><form id="edit-form"><div class="dialog-top"><h2 id="edit-title">Edit isian</h2><button type="button" id="close-edit" aria-label="Tutup dialog">×</button></div><label for="edit-value" id="edit-label"></label><input id="edit-value" maxlength="4000"><label for="edit-category" class="sr-only">Kategori modus</label><select id="edit-category" hidden></select><p id="edit-hint"></p><div class="dialog-actions"><button type="button" id="cancel-edit" class="secondary">Batal</button><button type="submit" class="primary">Simpan koreksi</button></div></form></dialog>
+</body>
+</html>

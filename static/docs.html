@@ -1,0 +1,14 @@
+<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>API lokal — Hybrid Intake</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/integration.css"></head><body><header class="topbar"><a class="brand" href="/">IASC / API Lokal</a><a href="/openapi.json">OpenAPI ↗</a></header><main class="host-main"><div class="eyebrow">SIMULASI LOKAL · BUKAN API RESMI</div><h1>Hybrid <em>intake.</em></h1><p>FastAPI + kontrak Pydantic lima tahap. Sesi berlaku selama 60 menit tidak aktif; satu worker. Token sesi adalah rahasia akses sementara.</p><div class="host-grid"><article class="host-card"><h2>Alur sesi v1</h2><pre>POST /api/v1/session/init
+GET  /api/v1/session/{id}
+POST /api/v1/session/{id}/upload
+POST /api/v1/session/{id}/chat
+POST /api/v1/session/{id}/verify-ekyc
+POST /api/v1/session/{id}/submit
+GET  /api/v1/session/{id}/status
+DELETE /api/v1/session/{id}</pre><p>Upload multipart: <code>ktp</code>, <code>bukti_transfer</code>, <code>bukti_chat</code>, <code>bukti_rekening_korban</code>. JPG/PNG/WebP maksimal 10 MiB awal per file, dikompresi menjadi &lt;900 kB. PDF tersedia pada kontrak data, tetapi ekstraksi PDF memerlukan adapter tambahan.</p><p>Chat: <code>{"text":"email=pelapor.dummy@example.com"}</code> atau <code>{"values":{"tahap1.email_pelapor":"pelapor.dummy@example.com"}}</code>. Konfirmasi: <code>{"confirm":true}</code>.</p></article><article class="host-card"><h2>Konfirmasi & integrasi</h2><pre>POST .../verify-ekyc
+{"simulate":true,"liveness_score":0.98}
+
+POST .../submit
+{"setuju_syarat_dan_ketentuan":true,
+ "captcha_answer":"jawaban pengguna",
+ "integration_mode":"dom"}</pre><p>Mode <code>dom</code> menghasilkan data dan mapping untuk mengisi replika. Mode <code>webhook</code> memanggil adapter mock lokal, mengembalikan nomor <code>SIM-…</code> dan <code>SIMULATED_NO_BANK_ACTION</code>. Keduanya selalu <code>submitted:false</code>.</p><p>Tidak ada e-KYC asli, pemblokiran dana, atau multi-hop tracing. Gateway remote tidak mengganti kegagalan dengan data dummy.</p><p><a href="/api/v1/schema">JSON Schema lengkap ↗</a> · <a href="/widget/iasc-ai-widget.html">Buka demo widget ↗</a></p></article></div></main></body></html>
