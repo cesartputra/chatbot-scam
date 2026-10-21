@@ -1,8 +1,11 @@
 import {PHASES,BANKS,CITIES,PELAPOR_FIELDS,emptyReport,amount,amountInput,fileError,validatePhase,validateRecord,metadata,applyChat,applyChatV1,referencesFile} from './report-core.mjs';
+import {createProgressState, resetProgressReport, acceptProgress, mapCanonicalPatch, flattenPatches, applyProgressPatch, sessionFileUrl, simulationResult} from './progressive-fill.mjs';
 
 const $=id=>document.getElementById(id);
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const report=emptyReport();
+const progressState=createProgressState(), progressFiles=new Map();
+let progressQueue=Promise.resolve(), applyingNative=false;
 let phase=1, highest=1, recordType=null, recordIndex=null, recordDraft=null, candidate={}, latestPayload=null;
 const expires=Date.now()+60*60*1000;
 const get=(object,path)=>path.split('.').reduce((value,key)=>value?.[key],object);
@@ -29,7 +32,7 @@ function upload(path,label,limit=2,required=true,object=report){
   const file=get(object,path),id='file-'+path.replaceAll('.','-');
   return `<div class="field"><label class="form-label" for="${id}">${esc(label)}${required?'<span class="required">*</span>':''}</label><input class="form-control" type="file" id="${id}" data-file="${path}" data-limit="${limit}" accept="application/pdf,image/jpeg,image/png">${file?`<p class="file-name">File yang sudah dipilih: ${esc(file.name)} <button type="button" class="btn btn-sm btn-link text-danger" data-clear-file="${path}">Hapus lampiran</button></p>`:''}<div class="form-text">Format PDF, JPG, PNG. Maks ${limit}MB.</div></div>`;
 }
-function table(headers,rows){return `<div class="table-wrap"><table class="table table-bordered"><thead><tr>${headers.map(h=>`<th scope="col">${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.length?rows.join(''):`<tr><td colspan="${headers.length}" class="table-empty">Belum ada data</td></tr>`}</tbody></table></div>`;}
+function table(headers,rows,list=''){return `<div class="table-wrap"><table class="table table-bordered"><thead><tr>${headers.map(h=>`<th scope="col">${esc(h)}</th>`).join('')}</tr></thead><tbody data-list="${list}">${rows.length?rows.join(''):`<tr><td colspan="${headers.length}" class="table-empty">Belum ada data</td></tr>`}</tbody></table></div>`;}
 function actions(type,index){return `<div class="icon-actions"><button class="btn btn-danger" type="button" data-edit="${type}:${index}" aria-label="Edit ${type} ${index+1}">✎</button><button class="btn btn-danger" type="button" data-delete="${type}:${index}" aria-label="Hapus ${type} ${index+1}">▤</button></div>`;}
 function sourceList(type){return type==='penerima'?report.transaksi.penerima:report[type];}
 function showErrors(errors,id='report-errors'){
@@ -49,15 +52,15 @@ function pelaporHTML(){
 }
 function terlaporHTML(){
   return `<button type="button" class="btn btn-danger" data-add="terlapor">＋ Tambah Informasi Terlapor</button>`+
-    table(['No','Nomor Terlapor','Nama Terlapor','Bukti Komunikasi','Aksi'],report.terlapor.map((row,i)=>`<tr><td>${i+1}</td><td>${esc(row.kode)} ${esc(row.nomor)}</td><td>${esc(row.nama)}</td><td><button type="button" class="btn btn-danger" data-preview="terlapor:${i}">Lihat Bukti</button></td><td>${actions('terlapor',i)}</td></tr>`))+
+    table(['No','Nomor Terlapor','Nama Terlapor','Bukti Komunikasi','Aksi'],report.terlapor.map((row,i)=>`<tr data-record="terlapor.${i}"><td>${i+1}</td><td data-progress-path="terlapor.${i}.nomor">${esc(row.kode)} ${esc(row.nomor)}</td><td data-progress-path="terlapor.${i}.nama">${esc(row.nama)||'<span class="progress-pending">Melengkapi data…</span>'}</td><td data-progress-path="terlapor.${i}.file">${row.file?`<button type="button" class="btn btn-danger" data-preview="terlapor:${i}">Lihat Bukti</button>`:'Menunggu bukti'}</td><td>${actions('terlapor',i)}</td></tr>`),'terlapor')+
     `<button type="button" class="btn btn-danger" data-add="media">＋ Tambah Sumber / Media Informasi Penipuan</button>`+
-    table(['No','Sumber / Media Informasi Penipuan','Detail Sumber / Media Informasi Penipuan','Bukti Sumber / Media Informasi Penipuan','Aksi'],report.media.map((row,i)=>`<tr><td>${i+1}</td><td>${esc(row.sumber)}</td><td>${esc(row.detail)}</td><td><button type="button" class="btn btn-danger" data-preview="media:${i}">Lihat Bukti</button></td><td>${actions('media',i)}</td></tr>`));
+    table(['No','Sumber / Media Informasi Penipuan','Detail Sumber / Media Informasi Penipuan','Bukti Sumber / Media Informasi Penipuan','Aksi'],report.media.map((row,i)=>`<tr data-record="media.${i}"><td>${i+1}</td><td data-progress-path="media.${i}.sumber">${esc(row.sumber)}</td><td data-progress-path="media.${i}.detail">${esc(row.detail)||'<span class="progress-pending">Melengkapi data…</span>'}</td><td data-progress-path="media.${i}.file">${row.file?`<button type="button" class="btn btn-danger" data-preview="media:${i}">Lihat Bukti</button>`:'Menunggu bukti'}</td><td>${actions('media',i)}</td></tr>`),'media');
 }
 function kejadianHTML(){return field('kejadian.tanggal','Tanggal dan Waktu Kejadian','datetime-local')+field('kejadian.kronologi','Kronologi Kejadian Penipuan','textarea')+'<div class="text-end small text-secondary mb-3" id="character-count">'+report.kejadian.kronologi.length+' / 4000</div>'+upload('files.kejadian','Upload Bukti Pendukung Kejadian')+upload('files.polisi','Upload Laporan Kepolisian',2,false);}
 function transaksiHTML(){
   return '<p>Apabila anda menggunakan lebih dari 1 Rekening yang digunakan untuk bertransaksi kepada pelaku scam, harap untuk membuat laporan baru sehingga dapat ditindaklanjuti.</p>'+field('transaksi.bank','Nama Penyelenggara Layanan Korban','select',BANKS)+field('transaksi.rekening','Nomor Rekening / Akun Korban')+field('transaksi.nama','Nama Pemilik Rekening / Akun Korban')+upload('files.rekening','Bukti Kepemilikan Rekening / Akun Korban')+
     '<button type="button" class="btn btn-danger" data-add="penerima">Tambah Informasi Penyelenggara Terlapor</button>'+
-    table(['No','Nama Penyelenggara','Nomor Rekening / Akun','Nama Pemilik Rekening / Akun','Aksi'],report.transaksi.penerima.map((row,i)=>`<tr><td>${i+1}</td><td>${esc(row.bank)}</td><td>${esc(row.rekening)}</td><td>${esc(row.nama)}</td><td>${actions('penerima',i)}</td></tr>`));
+    table(['No','Nama Penyelenggara','Nomor Rekening / Akun','Nama Pemilik Rekening / Akun','Aksi'],report.transaksi.penerima.map((row,i)=>`<tr data-record="transaksi.penerima.${i}"><td>${i+1}</td><td data-progress-path="transaksi.penerima.${i}.bank">${esc(row.bank)}<div class="progress-transactions">${(row.details||[]).map((detail,j)=>`<div data-progress-path="transaksi.penerima.${i}.details.${j}"><span data-progress-path="transaksi.penerima.${i}.details.${j}.waktu">${esc(detail.waktu)||'Waktu menunggu'}</span> · <strong data-progress-path="transaksi.penerima.${i}.details.${j}.nominal">${detail.nominal?esc(new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR'}).format(amount(detail.nominal))):'Nominal menunggu'}</strong><small data-progress-path="transaksi.penerima.${i}.details.${j}.file">${esc(detail.file?.name)||'Menunggu bukti transfer'}</small></div>`).join('')}</div></td><td data-progress-path="transaksi.penerima.${i}.rekening">${esc(row.rekening)}</td><td data-progress-path="transaksi.penerima.${i}.nama">${esc(row.nama)||'<span class="progress-pending">Melengkapi data…</span>'}</td><td>${actions('penerima',i)}</td></tr>`),'transaksi.penerima');
 }
 function reviewHTML(){
   const sender=report.transaksi;
@@ -67,7 +70,7 @@ function reviewHTML(){
   html+='<p class="terms-label">Syarat dan Ketentuan</p><div class="terms-box" tabindex="0"><h1>Syarat & Ketentuan</h1><p><b>Dokumen simulasi lokal.</b> Ini bukan persetujuan terhadap layanan resmi IASC. Data dan dokumen yang dipakai harus berupa contoh fiktif.</p>';
   const terms=[['Definisi','Aplikasi ini adalah replika antarmuka untuk menguji proses pelaporan dan chatbot.'],['Tujuan Pelaporan','Proses hanya menyusun data dummy dan tidak menginstruksikan pemblokiran atau pengembalian dana.'],['Pernyataan dan Jaminan Pelapor','Periksa isian dan bukti yang dipilih. Jangan memasukkan identitas, rekening, atau dokumen pribadi nyata.'],['Kewajiban Pelapor','Lengkapi data wajib agar alur simulasi dapat dijalankan. Semua hasil OCR harus ditinjau kembali.'],['Batasan Tanggung Jawab','Tidak ada laporan resmi yang dibuat. Simulasi tidak memberikan jaminan penyelamatan dana.'],['Pelaporan ke Penegak Hukum','Simulasi ini tidak menggantikan pelaporan melalui kanal resmi lembaga berwenang.'],['Penggunaan Data','Hasil simulasi disimpan pada localStorage browser ini. Lampiran hanya disimpan sebagai metadata, bukan file asli.'],['Penutup','Centang pernyataan di bawah hanya menandakan Anda meninjau contoh data lokal.']];
   terms.forEach(([title,text],i)=>html+=`<h4>Pasal ${i+1}: ${title}</h4><p>${text}</p>`);
-  return html+'</div><label class="review-label"><input id="review-local" type="checkbox" '+(report.reviewed?'checked':'')+'> <span>Saya menyatakan kesediaan untuk melapor dan memberikan informasi dengan benar. <small>(Simulasi data dummy.)</small></span></label><div class="captcha-demo"><span class="captcha-art">CAPTCHA DEMO</span><input class="form-control" aria-label="Captcha simulasi" placeholder="Dinonaktifkan di demo" disabled></div><p class="local-only-note">Penyelesaian hanya menyimpan hasil simulasi pada browser ini. Tidak ada laporan yang dikirim ke IASC.</p>';
+  return html+'</div><label class="review-label"><input id="review-local" type="checkbox" '+(report.reviewed?'checked':'')+'> <span>Saya menyatakan kesediaan untuk melapor dan memberikan informasi dengan benar. <small>(Simulasi data dummy.)</small></span></label><div class="captcha-demo"><span class="captcha-art" id="progress-captcha-question">'+esc(report.captcha_question||'CAPTCHA DEMO')+'</span><input id="progress-captcha-answer" class="form-control" aria-label="Captcha simulasi" placeholder="Jawab melalui Help Center" value="'+esc(report.captcha_answer||'')+'" readonly></div><p class="local-only-note">Penyelesaian hanya menyimpan hasil simulasi pada browser ini. Tidak ada laporan yang dikirim ke IASC.</p>';
 }
 function render(){
   if(phase!==5)report.reviewed=false;
@@ -76,10 +79,11 @@ function render(){
   $('report-stepper').innerHTML=PHASES.map((title,i)=>`<button type="button" role="tab" aria-selected="${phase===i+1}" ${i+1>highest?'disabled':''} class="${phase===i+1?'active':''}" data-step="${i+1}"><span>${i+1}</span><span>${title}</span></button>`).join('');
   const body=[pelaporHTML,terlaporHTML,kejadianHTML,transaksiHTML,reviewHTML][phase-1]();
   $('phase-form').innerHTML=body+`<div class="form-actions">${phase>1?'<button type="button" class="btn btn-danger" id="previous">Kembali</button>':''}${phase<5?'<button type="submit" class="btn btn-danger" id="next">Lanjut</button>':'<button type="button" class="btn btn-outline-danger" id="download-local">Unduh Draft JSON</button><button type="button" class="btn btn-secondary" disabled>Kirim Laporan Penipuan</button><button type="submit" class="btn btn-danger" id="save-local">Simpan Simulasi Lokal</button>'}</div>`;
+  restoreFileInputs($('phase-form'),report);
   $('report-errors').hidden=true;
   document.title=PHASES[phase-1]+' — IASC Lokal';
 }
-function capture(){collect($('phase-form'),report);if(phase===1){report.pelapor.sendiri=$('phase-form').querySelector('[name="sendiri"]:checked')?.value||'ya';report.pelapor.jenis_kelamin=$('phase-form').querySelector('[name="jenis_kelamin"]:checked')?.value||'';}if(phase===5&&$('review-local'))report.reviewed=$('review-local').checked;}
+function capture(){if(latestPayload)return;collect($('phase-form'),report);if(phase===1){report.pelapor.sendiri=$('phase-form').querySelector('[name="sendiri"]:checked')?.value||'ya';report.pelapor.jenis_kelamin=$('phase-form').querySelector('[name="jenis_kelamin"]:checked')?.value||'';}if(phase===5&&$('review-local'))report.reviewed=$('review-local').checked;}
 function go(target,push=true){
   capture();
   if(target>phase){for(let n=1;n<target;n++){const errors=validatePhase(report,n);if(errors.length){if(n!==phase){phase=n;render();}showErrors(errors);return;}}}
@@ -104,7 +108,15 @@ function renderRecord(){
     html+=row.details.map((detail,i)=>`<div class="detail-transaction"><div class="detail-title"><span>Transaksi ${i+1}</span>${row.details.length>1?`<button type="button" class="btn btn-sm btn-outline-danger" data-remove-detail="${i}">Hapus</button>`:''}</div>${field('details.'+i+'.waktu','Waktu Transaksi','datetime-local',null,true,row)}${field('details.'+i+'.nominal','Nominal Transaksi','text',null,true,row)}${upload('details.'+i+'.file','Upload Bukti Pendukung Kejadian',2,true,row)}</div>`).join('');
     html+='<button type="button" class="btn btn-danger" id="add-detail">Tambah Informasi Transaksi</button>';
   }
-  $('record-fields').innerHTML=html;$('record-errors').hidden=true;
+  $('record-fields').innerHTML=html;restoreFileInputs($('record-fields'),recordDraft);$('record-errors').hidden=true;
+}
+function restoreFileInputs(container,data){
+  for(const input of container.querySelectorAll('[data-file]')){
+    const file=get(data,input.dataset.file)?.blob;
+    if(!file)continue;
+    try{const transfer=new DataTransfer();transfer.items.add(file);input.files=transfer.files;}
+    catch{/* Metadata remains usable in browsers that block FileList assignment. */}
+  }
 }
 async function attachment(file,limit){
   const error=fileError(file,limit);if(error)throw new Error(error);
@@ -133,19 +145,21 @@ function finish(){
   $('phase-form').innerHTML=`<div class="alert alert-success"><h5>Data simulasi berhasil disimpan di browser ini.</h5><p>Nomor Laporan Simulasi:</p><p class="success-number">${esc(latestPayload.id)}</p><p class="mb-0">Tidak ada laporan yang dikirim ke IASC dan tidak ada pemblokiran rekening.</p></div><div class="form-actions"><button class="btn btn-danger" id="download-result" type="button">Unduh Hasil Simulasi</button><a class="btn btn-outline-danger" href="/Guest/CekLaporan?id=${encodeURIComponent(latestPayload.id)}">Cek Laporan Simulasi</a><a href="/" class="btn btn-secondary">Kembali ke Beranda</a></div>`;
   $('phase-form').scrollIntoView({block:'center'});
 }
-$('phase-form').addEventListener('input',event=>{if(event.target.matches('[data-field]')){set(report,event.target.dataset.field,event.target.value.trim());report.reviewed=false;}if(event.target.dataset.field==='kejadian.kronologi')$('character-count').textContent=event.target.value.length+' / 4000';});
+$('phase-form').addEventListener('input',event=>{if(event.target.matches('[data-field]')){if(!applyingNative)progressState.manual.add(event.target.dataset.field);set(report,event.target.dataset.field,event.target.value.trim());report.reviewed=false;}if(event.target.dataset.field==='kejadian.kronologi')$('character-count').textContent=event.target.value.length+' / 4000';});
 $('phase-form').addEventListener('change',event=>{
   const target=event.target;
-  if(target.name==='sendiri'){capture();render();}
-  if(target.name==='jenis_kelamin')report.pelapor.jenis_kelamin=target.value;
-  if(target.id==='review-local')report.reviewed=target.checked;
-  if(target.dataset.field==='pelapor.provinsi'){capture();report.pelapor.kota='';render();}
+  if(!applyingNative&&target.dataset.field)progressState.manual.add(target.dataset.field);
+  if(target.name==='sendiri'){if(!applyingNative)progressState.manual.add('pelapor.sendiri');capture();render();}
+  if(target.name==='jenis_kelamin'){if(!applyingNative)progressState.manual.add('pelapor.jenis_kelamin');report.pelapor.jenis_kelamin=target.value;}
+  if(target.id==='review-local'){if(!applyingNative)progressState.manual.add('reviewed');report.reviewed=target.checked;}
+  if(!applyingNative&&target.dataset.field==='pelapor.provinsi'){capture();report.pelapor.kota='';progressState.manual.add('pelapor.kota');render();}
   if(target.dataset.field==='pelapor.kota'&&target.value==='__manual__'){
     const input=document.createElement('input');input.id=target.id;input.dataset.field='pelapor.kota';input.className='form-control';input.placeholder='Ketik nama kota / kabupaten';input.maxLength=100;target.replaceWith(input);input.focus();report.pelapor.kota='';
   }
 });
 async function fileChanged(event,object,errorId){
-  const input=event.target;if(!input.dataset.file||!input.files[0])return;
+  const input=event.target;if(applyingNative||!input.dataset.file||!input.files[0])return;
+  if(object===report)progressState.manual.add(input.dataset.file);
   try{const value=await attachment(input.files[0],Number(input.dataset.limit));const previous=get(object,input.dataset.file);set(object,input.dataset.file,value);if(previous?.url&&!referencesFile(report,previous)&&!referencesFile(recordDraft,previous))URL.revokeObjectURL(previous.url);showErrors([],errorId);if(errorId==='record-errors'){collect($('record-fields'),recordDraft);renderRecord();}else{capture();render();}}
   catch(error){input.value='';showErrors([error.message],errorId);}
 }
@@ -160,9 +174,9 @@ $('phase-form').addEventListener('click',event=>{
   if(button.id==='download-result')return download(latestPayload);
   if(button.dataset.add)return openRecord(button.dataset.add);
   if(button.dataset.edit){const [type,index]=button.dataset.edit.split(':');return openRecord(type,Number(index));}
-  if(button.dataset.delete){const [type,index]=button.dataset.delete.split(':');if(confirm('Hapus baris data dummy ini dari simulasi?')){sourceList(type).splice(Number(index),1);render();}return;}
+  if(button.dataset.delete){const [type,index]=button.dataset.delete.split(':');if(confirm('Hapus baris data dummy ini dari simulasi?')){progressState.manual.add(type==='penerima'?'transaksi.penerima':type);sourceList(type).splice(Number(index),1);render();}return;}
   if(button.dataset.preview){const [type,index]=button.dataset.preview.split(':');return preview(sourceList(type)[Number(index)].file);}
-  if(button.dataset.clearFile){capture();set(report,button.dataset.clearFile,null);render();}
+  if(button.dataset.clearFile){capture();progressState.manual.add(button.dataset.clearFile);set(report,button.dataset.clearFile,null);render();}
 });
 $('record-form').addEventListener('click',event=>{
   const button=event.target.closest('button');if(!button)return;
@@ -173,7 +187,10 @@ $('record-form').addEventListener('click',event=>{
 $('record-form').addEventListener('submit',event=>{
   event.preventDefault();collect($('record-fields'),recordDraft);const errors=validateRecord(recordType,recordDraft);if(errors.length)return showErrors(errors,'record-errors');
   if(recordType==='penerima')recordDraft.details.forEach(detail=>detail.nominal=amount(detail.nominal));
-  const list=sourceList(recordType);if(recordIndex===null)list.push(recordDraft);else list[recordIndex]=recordDraft;
+  const list=sourceList(recordType);const localIndex=recordIndex===null?list.length:recordIndex;
+  const prefix=(recordType==='penerima'?'transaksi.penerima':recordType)+'.'+localIndex;
+  const mark=(object,path)=>{for(const [key,value] of Object.entries(object)){const next=path+'.'+key;if(value&&typeof value==='object'&&!('url' in value))mark(value,next);else progressState.manual.add(next);}};mark(recordDraft,prefix);
+  if(recordIndex===null)list.push(recordDraft);else list[recordIndex]=recordDraft;
   $('record-dialog').close();render();notice('Data berhasil disimpan pada formulir lokal.');
 });
 for(const id of ['close-record','cancel-record'])$(id).addEventListener('click',()=>$('record-dialog').close());
@@ -190,44 +207,115 @@ $('fill-dummy').addEventListener('click',async()=>{
     report.media=[{sumber:'Website',detail:'https://example.com/dummy-test - DATA FIKTIF',file}];
     report.kejadian={tanggal:'2026-10-19T10:00',kronologi:'DATA DUMMY UNTUK PENGUJIAN. Pada 19 Oktober 2026, pelapor melakukan transfer fiktif untuk penawaran barang contoh. Tidak ada kejadian atau tuduhan nyata.'};
     report.transaksi={bank:'BNI',rekening:'0000000000',nama:'PEMILIK REKENING DUMMY',penerima:[{bank:'BCA',rekening:'0000000001',nama:'TERLAPOR DUMMY - FIKTIF',details:[{waktu:'2026-10-19T10:00',nominal:100000,file}]}]};
-    report.reviewed=false;render();notice('Contoh dummy terisi untuk lima fase. Semua data dan lampiran bersifat fiktif.');
+    for(const key of ['pelapor','kejadian','transaksi','files']){const mark=(value,path)=>{for(const [field,child] of Object.entries(value)){if(child&&typeof child==='object'&&!('url' in child))mark(child,path+'.'+field);else progressState.manual.add(path+'.'+field);}};mark(report[key],key);}progressState.manual.add('terlapor');progressState.manual.add('media');report.reviewed=false;render();notice('Contoh dummy terisi untuk lima fase. Semua data dan lampiran bersifat fiktif.');
   }catch(error){showErrors([error.message]);}finally{button.disabled=false;}
 });
-document.addEventListener('iasc-intake:apply',async event=>{
-  if(!event.detail?.data||typeof event.detail.data!=='object')return;
-  capture();let file=null;
-  try{if(event.detail.evidence instanceof Blob&&['image/png','image/jpeg'].includes(event.detail.evidence.type))file=await attachment(new File([event.detail.evidence],'bukti-dari-chatbot.'+(event.detail.evidence.type==='image/png'?'png':'jpg'),{type:event.detail.evidence.type}),2);
-    candidate=Object.fromEntries(Object.entries(event.detail.data).filter(([key,value])=>typeof value==='string'||(key==='nominal'&&Number.isSafeInteger(value))));const count=applyChat(report,candidate,file);render();notice(`${count} isian kosong dilengkapi dari chatbot. Isian manual tetap dipertahankan. Periksa hasilnya dan lengkapi lampiran lain yang wajib.`);
-  }catch(error){showErrors([error.message]);}
-});
-
-document.addEventListener('iasc-intake:apply-v1',async event=>{
-  const data=event.detail?.data,sessionId=event.detail?.session_id;
-  if(!data||typeof data!=='object'||typeof sessionId!=='string')return;
-  capture();
-  const files=new Map();
-  const key=meta=>meta?.url||meta?.file_url||meta?.storage_url||meta?.id;
-  async function visit(value){
-    if(!value||typeof value!=='object')return;
-    const fileKey=key(value);
-    if(fileKey&&typeof fileKey==='string'&&!files.has(fileKey)){
-      const url=new URL(value.url||value.file_url||value.storage_url||'',location.origin);
-      if(url.origin!==location.origin||!url.pathname.startsWith('/api/v1/session/'+encodeURIComponent(sessionId)+'/'))return;
-      const response=await fetch(url,{credentials:'same-origin'});
-      if(!response.ok)throw new Error('Lampiran sesi tidak dapat diambil. Buka kembali asisten untuk mengunggah ulang.');
-      const blob=await response.blob();
-      const filename=value.file_name||value.filename||value.name||'bukti-chatbot.jpg';
-      files.set(fileKey,await attachment(new File([blob],filename,{type:blob.type}),2));
-      return;
-    }
-    for(const child of Object.values(value))await visit(child);
+function switchProgressPhase(target){
+  if(phase===target)return;
+  capture();phase=target;highest=Math.max(highest,target);render();
+  const url=new URL(location.href);url.searchParams.set('step',String(phase));history.replaceState({phase},'',url.pathname+url.search);
+}
+function flashProgress(node){
+  if(!node)return;
+  const target=node.closest('.field')||node;
+  target.classList.remove('progress-autofill');void target.offsetWidth;target.classList.add('progress-autofill');
+  target.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'center'});
+  setTimeout(()=>target.classList.remove('progress-autofill'),1500);
+}
+function showProgressField(change){
+  const path=change.path;
+  if(/^(terlapor|media|transaksi\.penerima)\.\d+\./.test(path)){
+    const prefix=path.match(/^(terlapor|media|transaksi\.penerima)\.(\d+)/)[0];
+    const template=document.createElement('template');template.innerHTML=phase===2?terlaporHTML():transaksiHTML();
+    const row=template.content.querySelector(`[data-record="${prefix}"]`),existing=$('phase-form').querySelector(`[data-record="${prefix}"]`);
+    if(row){if(existing)existing.replaceWith(row);else{const list=prefix.replace(/\.\d+$/,'');const body=$('phase-form').querySelector(`[data-list="${list}"]`);body?.querySelector('.table-empty')?.closest('tr').remove();body?.append(row);}}
+    return flashProgress($('phase-form').querySelector(`[data-progress-path="${path}"]`)||$('phase-form').querySelector(`[data-record="${prefix}"]`));
   }
+  let node=$('phase-form').querySelector(`[data-field="${path}"]`);
+  if(path==='pelapor.sendiri'||path==='pelapor.jenis_kelamin'){
+    const name=path==='pelapor.sendiri'?'sendiri':'jenis_kelamin';
+    for(const radio of $('phase-form').querySelectorAll(`[name="${name}"]`))radio.checked=radio.value===change.value;
+    node=$('phase-form').querySelector(`[name="${name}"]:checked`);
+  }else if(path.startsWith('files.')){
+    node=$('phase-form').querySelector(`[data-file="${path}"]`);
+    if(node){
+      node.closest('.field').querySelector('.file-name')?.remove();
+      node.value='';
+      if(change.value){
+        restoreFileInputs($('phase-form'),report);
+        const label=document.createElement('p');label.className='file-name';label.textContent='File dari percakapan: '+change.value.name;node.after(label);
+      }
+    }
+  }else if(path==='reviewed'){node=$('review-local');if(node)node.checked=change.value;}
+  else if(path==='captcha_question'){node=$('progress-captcha-question');if(node)node.textContent=change.value;}
+  else if(path==='captcha_answer'){node=$('progress-captcha-answer');if(node)node.value=change.value;}
+  else if(node){
+    if(node.tagName==='SELECT'&&![...node.options].some(option=>option.value===change.value))node.add(new Option(change.value,change.value));
+    node.value=change.value;
+    applyingNative=true;
+    try{node.dispatchEvent(new Event('input',{bubbles:true}));node.dispatchEvent(new Event('change',{bubbles:true}));}finally{applyingNative=false;}
+    if(path==='pelapor.kode_telepon'&&!progressState.manual.has('pelapor.konfirmasi_kode_telepon'))report.pelapor.konfirmasi_kode_telepon=change.value;
+  }
+  flashProgress(node);
+}
+async function resolveProgressFile(meta,sessionId){
+  if(meta===null)return null;
+  const url=sessionFileUrl(meta,sessionId,location.origin);
+  if(!url)throw new Error('Lampiran ditolak: harus berasal dari sesi asisten yang sama.');
+  if(progressFiles.has(url))return progressFiles.get(url);
+  const response=await fetch(url,{credentials:'same-origin',redirect:'error'});
+  if(!response.ok||Number(response.headers.get('content-length'))>2*1024*1024)throw new Error('Lampiran sesi tidak dapat diambil atau melebihi batas ukuran.');
+  const blob=await response.blob();
+  const file=await attachment(new File([blob],meta.filename||meta.file_name||'bukti-percakapan.jpg',{type:blob.type}),2);
+  progressFiles.set(url,file);return file;
+}
+function completeProgress(result){
+  if(!simulationResult(result))return;
+  latestPayload={schema_version:'local-replica-0.3',id:result.ticket_number,ticket_number:result.ticket_number,generated_at:new Date().toISOString(),simulated:true,submitted:false,data:metadata(report)};
+  let saved=true;
   try{
-    await visit(data);
-    const count=applyChatV1(report,data,meta=>files.get(key(meta))||null);
-    highest=1;for(let n=1;n<=4;n++){if(validatePhase(report,n).length)break;highest=n+1;}
-    render();notice(`${count} isian dan kelompok data kosong dilengkapi dari asisten. Periksa setiap fase; isian manual dan persetujuan tetap milik Anda. Tidak ada laporan yang dikirim.`);
-  }catch(error){showErrors([error.message]);}
+    const existing=JSON.parse(localStorage.getItem('iasc-local-reports')||'[]');if(!Array.isArray(existing))throw new Error();
+    if(!existing.some(item=>item.id===latestPayload.id))localStorage.setItem('iasc-local-reports',JSON.stringify([...existing,latestPayload]));
+  }catch{saved=false;}
+  $('phase-title').textContent='Simulasi Laporan Selesai';
+  document.title='Simulasi Laporan Selesai — IASC Lokal';
+  document.querySelector('.demo-toolbar span').textContent=saved?'Simulasi tersimpan di browser ini.':'Unduh hasil untuk menyimpan salinan simulasi.';
+  $('phase-form').innerHTML=`<div class="alert alert-success"><h5>Simulasi laporan selesai.</h5><p>Nomor Tiket Laporan Simulasi:</p><p class="success-number">${esc(result.ticket_number)}</p><p class="mb-0">Tidak ada laporan resmi yang dikirim dan tidak ada pemblokiran rekening.</p></div><div class="form-actions"><button class="btn btn-danger" id="download-result" type="button">Unduh Hasil Simulasi</button><a class="btn btn-outline-danger" href="/Guest/CekLaporan?id=${encodeURIComponent(result.ticket_number)}">Cek Laporan Simulasi</a></div>`;
+  flashProgress($('phase-form').querySelector('.alert'));
+}
+async function applyProgressiveDomFill(message){
+  const ack={session_id:message.session_id,revision:message.revision,applied_fields:0,skipped_fields:0,applied_by_step:{},conflicts:[],step:phase};
+  try{
+    const priorSession=progressState.sessionId;
+    if(priorSession&&priorSession!==message.session_id&&!progressState.retired.has(message.session_id)&&/^[A-Za-z0-9_-]{16,128}$/.test(message.session_id||'')&&Number.isSafeInteger(message.revision)&&message.revision>=0&&Number.isInteger(message.active_wizard_step)&&message.active_wizard_step>=1&&message.active_wizard_step<=5){capture();resetProgressReport(report,progressState);latestPayload=null;phase=1;highest=1;notice('');render();}
+    if(!acceptProgress(progressState,message)){ack.ignored=true;return ack;}
+    const patches=flattenPatches(message.dom_patches);
+    if(priorSession!==message.session_id&&latestPayload){latestPayload=null;phase=1;highest=1;render();}
+    for(const patch of patches){
+      const mapped=mapCanonicalPatch(patch);if(!mapped)continue;
+      if((mapped.path==='reviewed'||mapped.path==='captcha_answer')&&!simulationResult(message.result))continue;
+      let file=null;if(mapped.file&&mapped.value)file=await resolveProgressFile(mapped.value,message.session_id);
+      capture();
+      const change=applyProgressPatch(report,patch,progressState,{resolveFile:()=>file,result:message.result});
+      if(!change.applied){if(change.reason==='manual'){ack.skipped_fields++;ack.conflicts.push({path:change.path,current:String(change.current??''),proposed:typeof change.proposed==='string'?change.proposed:'Lampiran dari asisten'});}continue;}
+      switchProgressPhase(change.step);showProgressField(change);
+      ack.applied_fields++;ack.applied_by_step[change.step]=(ack.applied_by_step[change.step]||0)+1;
+      await new Promise(resolve=>setTimeout(resolve,120));
+    }
+    capture();switchProgressPhase(message.active_wizard_step);highest=Math.max(highest,message.active_wizard_step);
+    progressState.revision=message.revision;ack.step=phase;
+    if(ack.skipped_fields){
+      notice(`${ack.applied_fields} field terisi otomatis. ${ack.skipped_fields} perubahan berbeda dengan isian manual dan dipertahankan.`);
+      const diff=document.createElement('details');const label=document.createElement('summary');label.textContent='Lihat perbedaan isian manual';diff.append(label);
+      for(const conflict of ack.conflicts){const line=document.createElement('p');line.textContent=`${conflict.path}: isian Anda “${conflict.current}”; usulan asisten “${conflict.proposed}”.`;diff.append(line);}$('report-notice').append(diff);
+    }else if(ack.applied_fields)notice(`${ack.applied_fields} field berhasil diisi otomatis dari percakapan. Anda dapat meninjau atau mengubah isian.`);
+    if(simulationResult(message.result))completeProgress(message.result);
+  }catch(error){ack.error=error.message;showErrors([error.message]);}
+  return ack;
+}
+document.addEventListener('iasc-intake:progress',event=>{
+  const message=event.detail;
+  progressQueue=progressQueue.catch(()=>{}).then(()=>applyProgressiveDomFill(message)).then(ack=>document.dispatchEvent(new CustomEvent('iasc-intake:progress-applied',{detail:ack})));
 });
 
 window.addEventListener('popstate',()=>{const target=Number(new URLSearchParams(location.search).get('step'))||1;if(target>=1&&target<=highest)go(target,false);});

@@ -21,11 +21,39 @@ from services.normalizer import normalize_bank, normalize_location, normalize_me
 
 
 class IntakeState(StrEnum):
-    EVIDENCE = "STATE_1_EVIDENCE_UPLOAD"
-    DELTA = "STATE_2_DELTA_SLOT_FILLING"
-    CONFIRM = "STATE_3_CONFIRMATION_CARD"
-    EKYC = "STATE_4_EKYC_VERIFICATION"
-    DISPATCH = "STATE_5_DISPATCH_FREEZE"
+    STATUS = "PELAPOR_STATUS"
+    KTP = "KTP_UPLOAD"
+    PELAPOR = "PELAPOR_DETAILS"
+    CONTACT = "CONTACT_INPUT"
+    CHAT = "CHAT_EVIDENCE_UPLOAD"
+    TERLAPOR = "TERLAPOR_DETAILS"
+    CHAT_MORE = "CHAT_MORE"
+    CHRONOLOGY = "CHRONOLOGY_INPUT"
+    KEJADIAN = "KEJADIAN_DETAILS"
+    POLICE = "POLICE_REPORT_OPTIONAL"
+    ACCOUNT = "ACCOUNT_PROOF_UPLOAD"
+    ACCOUNT_DETAILS = "ACCOUNT_DETAILS"
+    TRANSFER = "TRANSFER_UPLOAD"
+    TRANSFER_DETAILS = "TRANSFER_DETAILS"
+    TRANSFER_MORE = "TRANSFER_MORE"
+    CONFIRM = "FINAL_CONFIRMATION"
+    COMPLETED = "COMPLETED"
+
+
+UPLOAD_STATES = {
+    IntakeState.KTP: "ktp", IntakeState.CHAT: "bukti_chat",
+    IntakeState.POLICE: "laporan_kepolisian", IntakeState.ACCOUNT: "bukti_rekening_korban",
+    IntakeState.TRANSFER: "bukti_transfer",
+}
+TURN_STEPS = {
+    IntakeState.STATUS: 1, IntakeState.KTP: 1, IntakeState.PELAPOR: 1, IntakeState.CONTACT: 1,
+    IntakeState.CHAT: 2, IntakeState.TERLAPOR: 2, IntakeState.CHAT_MORE: 2,
+    IntakeState.CHRONOLOGY: 3, IntakeState.KEJADIAN: 3, IntakeState.POLICE: 3,
+    IntakeState.ACCOUNT: 4, IntakeState.ACCOUNT_DETAILS: 4, IntakeState.TRANSFER: 4,
+    IntakeState.TRANSFER_DETAILS: 4, IntakeState.TRANSFER_MORE: 4,
+    IntakeState.CONFIRM: 5, IntakeState.COMPLETED: 5,
+}
+CONTACT_FIELDS = {"tahap1.nomor_telepon_pelapor", "tahap1.email_pelapor"}
 
 
 STAGES = {
@@ -82,7 +110,7 @@ def public_value(value):
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
     if isinstance(value, Decimal):
-        return int(value) if value == value.to_integral_value() else float(value)
+        return format(value, "f")
     return value
 
 
@@ -94,7 +122,7 @@ class IntakeSession:
     sources: dict = field(default_factory=dict)
     files: dict = field(default_factory=dict)
     evidence: dict = field(default_factory=dict)
-    state: IntakeState = IntakeState.EVIDENCE
+    state: IntakeState = IntakeState.STATUS
     confirmed: bool = False
     ekyc: dict = field(default_factory=lambda: {"verified": False, "simulated": True})
     challenge: tuple = field(default_factory=lambda: (secrets.randbelow(80) + 10, secrets.randbelow(10)))
@@ -103,6 +131,7 @@ class IntakeSession:
     dispatch: dict | None = None
     observed_identity_name: str | None = None
     observed_account_name: str | None = None
+    chronology_received: bool = False
     touched: float = field(default_factory=time.monotonic)
     started: float = field(default_factory=time.monotonic)
     mutations: list = field(default_factory=list)
@@ -163,11 +192,6 @@ def sync_derived(session):
         if p.get(source):
             p[target] = p[source]
     t = session.data["tahap4"]
-    if p.get("nama_pelapor") and (not t.get("nama_pemilik_rekening_akun_korban") or session.sources.get("tahap4.nama_pemilik_rekening_akun_korban") == "default"):
-        path = "tahap4.nama_pemilik_rekening_akun_korban"
-        t["nama_pemilik_rekening_akun_korban"] = p["nama_pelapor"]
-        session.sources[path] = "default"
-        session.confidence[path] = 0.0
     for i, row in enumerate(t.get("daftar_penyelenggara_terlapor", [])):
         for j, detail in enumerate(row.get("daftar_rincian_transaksi", [])):
             parent = f"tahap4.daftar_penyelenggara_terlapor.{i}."
@@ -272,41 +296,150 @@ def stage_errors(session):
     return result
 
 
+def errors_for(session, stage, *, exclude=(), prefix=None):
+    return [item for item in stage_errors(session) if item["path"].startswith(stage + ".")
+            and item["path"] not in exclude and (prefix is None or item["path"].startswith(prefix))]
+
+
 def advance(session):
-    if not all(kind in session.evidence for kind in EVIDENCE_KINDS):
-        session.state = IntakeState.EVIDENCE
-    elif stage_errors(session):
-        session.state = IntakeState.DELTA
-    elif not session.confirmed:
-        session.state = IntakeState.CONFIRM
-    elif not session.ekyc.get("verified"):
-        session.state = IntakeState.EKYC
-    else:
-        session.state = IntakeState.DISPATCH
+    """Resolve only the current turn; future stages never prompt for missing fields early."""
+    if session.state == IntakeState.PELAPOR and not errors_for(session, "tahap1", exclude=CONTACT_FIELDS):
+        session.state = IntakeState.CONTACT
+    if session.state == IntakeState.CONTACT and not errors_for(session, "tahap1"):
+        session.state = IntakeState.CHAT
+    if session.state == IntakeState.TERLAPOR and not errors_for(session, "tahap2"):
+        session.state = IntakeState.CHAT_MORE
+    if session.state == IntakeState.KEJADIAN and not errors_for(session, "tahap3"):
+        session.state = IntakeState.POLICE
+    if session.state == IntakeState.ACCOUNT_DETAILS and not account_errors(session):
+        session.state = IntakeState.TRANSFER
+    if session.state == IntakeState.TRANSFER_DETAILS and not errors_for(session, "tahap4"):
+        session.state = IntakeState.TRANSFER_MORE
+    if session.state == IntakeState.CONFIRM:
+        missing = stage_errors(session)
+        if missing:
+            stage = int(missing[0]["path"][5])
+            session.state = {1: IntakeState.PELAPOR, 2: IntakeState.TERLAPOR,
+                             3: IntakeState.KEJADIAN, 4: IntakeState.TRANSFER_DETAILS}[stage]
 
 
-def snapshot(session, *, simulated=True):
-    advance(session)
-    missing = stage_errors(session)
-    absent_evidence = [kind for kind in EVIDENCE_KINDS if kind not in session.evidence]
-    question = "Unggah bukti: " + ", ".join(absent_evidence) + "." if absent_evidence else (missing[0]["question"] if missing else "Tinjau seluruh ringkasan sebelum melanjutkan.")
-    if not missing and not session.data["tahap5"]:
-        t = session.data["tahap4"]
-        session.data["tahap5"] = {
-            "ringkasan_sumber_transaksi_korban": {"penyelenggara_layanan": t["nama_penyelenggara_layanan_korban"], "pemilik_rekening": t["nama_pemilik_rekening_akun_korban"], "nomor_rekening_akun": t["nomor_rekening_akun_korban"]},
-            "ringkasan_lembaga_terlapor": [{"penyelenggara_layanan": row["nama_penyelenggara"], "pemilik_rekening": row["nama_pemilik_rekening_akun"], "nomor_rekening_akun": row["nomor_rekening_akun"]} for row in t["daftar_penyelenggara_terlapor"]],
-            "setuju_syarat_dan_ketentuan": False, "captcha_question": session.captcha_question,
-        }
+def account_errors(session):
+    return [item for item in errors_for(session, "tahap4") if not item["path"].startswith("tahap4.daftar_penyelenggara_terlapor")]
+
+
+def current_errors(session):
+    if session.state == IntakeState.PELAPOR:
+        return errors_for(session, "tahap1", exclude=CONTACT_FIELDS)
+    if session.state == IntakeState.CONTACT:
+        return errors_for(session, "tahap1")
+    if session.state == IntakeState.TERLAPOR:
+        return errors_for(session, "tahap2")
+    if session.state == IntakeState.KEJADIAN:
+        return errors_for(session, "tahap3")
+    if session.state == IntakeState.ACCOUNT_DETAILS:
+        return account_errors(session)
+    if session.state == IntakeState.TRANSFER_DETAILS:
+        return errors_for(session, "tahap4")
+    return []
+
+
+def summary(session):
+    t = session.data["tahap4"]
     return {
-        "session_id": session.session_id, "state": session.state, "data": session.data,
-        "missing_slots": missing, "missing_evidence": absent_evidence,
-        "question": question, "next_slot": missing[0]["path"] if missing else None,
-        "ready_for_confirmation": not missing and not absent_evidence, "confirmed": session.confirmed,
-        "confidence": session.confidence, "sources": session.sources, "ekyc": session.ekyc,
+        "ringkasan_sumber_transaksi_korban": {"penyelenggara_layanan": t.get("nama_penyelenggara_layanan_korban"), "pemilik_rekening": t.get("nama_pemilik_rekening_akun_korban"), "nomor_rekening_akun": t.get("nomor_rekening_akun_korban")},
+        "ringkasan_lembaga_terlapor": [{"penyelenggara_layanan": row.get("nama_penyelenggara"), "pemilik_rekening": row.get("nama_pemilik_rekening_akun"), "nomor_rekening_akun": row.get("nomor_rekening_akun")} for row in t.get("daftar_penyelenggara_terlapor", [])],
+    }
+
+
+def prepare_confirmation(session):
+    session.state = IntakeState.CONFIRM
+    advance(session)
+    if session.state == IntakeState.CONFIRM:
+        session.confirmed = True
+        session.data["tahap5"] = {**summary(session), "setuju_syarat_dan_ketentuan": False,
+                                  "captcha_question": session.captcha_question}
+
+
+def changed_patches(before, after):
+    """Files are atomic references; table columns remain individual progressive patches."""
+    result = []
+    def walk(old, value, path):
+        if old == value:
+            return
+        if isinstance(value, dict) and "file_id" not in value:
+            for key, item in value.items():
+                walk(old.get(key) if isinstance(old, dict) else None, item, f"{path}.{key}" if path else key)
+            if isinstance(old, dict):
+                for key in old.keys() - value.keys():
+                    walk(old[key], None, f"{path}.{key}" if path else key)
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                walk(old[index] if isinstance(old, list) and index < len(old) else None, item, f"{path}.{index}")
+        elif path:
+            result.append({"op": "set", "path": path, "value": deepcopy(value), "step": int(path[5])})
+    walk(before, after, "")
+    return result
+
+
+def turn_message(session, missing):
+    state = session.state
+    if missing and (session.state != IntakeState.CONTACT or len(missing) == 1 or missing[0]["reason"] == "low_confidence"):
+        if missing[0]["reason"] == "low_confidence":
+            value = get_path(session.data, missing[0]["path"])
+            return f"{missing[0]['question']} Hasil yang terbaca: {value}. Jika berbeda, ketik nilai yang benar.", []
+        return missing[0]["question"], []
+    name = get_path(session.data, "tahap1.nama_pelapor", "pelapor")
+    transfer_message = "Bukti transfer sudah ditambahkan ke daftar transaksi. Ada bukti transfer lain, atau lanjut ke Tahap 5?"
+    latest_id = session.evidence.get("bukti_transfer", {}).get("file_id")
+    for row in session.data["tahap4"].get("daftar_penyelenggara_terlapor", []):
+        for item in row.get("daftar_rincian_transaksi", []):
+            if item.get("upload_bukti_pendukung_kejadian", {}).get("file_id") == latest_id:
+                amount = format(Decimal(str(item["nominal_transaksi"])), ",f").replace(",", "_").replace(".", ",").replace("_", ".")
+                transfer_message = f"Transfer sebesar Rp{amount} ke {row.get('nama_penyelenggara')} ({row.get('nomor_rekening_akun')}) sudah saya tambahkan. Ada bukti transfer lain, atau lanjut ke Tahap 5?"
+    messages = {
+        IntakeState.STATUS: "Halo, selamat datang di Help Center IASC OJK versi simulasi lokal. Jangan panik, saya akan memandu dan mengisi formulir dummy secara otomatis. Apakah Anda sendiri yang mengalami penipuan ini?",
+        IntakeState.KTP: "Baik. Untuk mengisi biodata di Tahap 1, silakan kirim foto KTP melalui tombol lampiran. Demo lokal: gunakan gambar dummy, bukan identitas asli.",
+        IntakeState.CONTACT: f"Data KTP atas nama {name} sudah saya masukkan ke Tahap 1. Sekarang ketik nomor telepon aktif dan alamat email Anda, misalnya 08123456789, nama@example.com.",
+        IntakeState.CHAT: "Tahap 1 lengkap! Kita masuk Tahap 2. Silakan kirim screenshot bukti chat / komunikasi dengan pelaku melalui tombol lampiran.",
+        IntakeState.CHAT_MORE: "Informasi terlapor dan media sudah terisi di Tahap 2. Ada bukti chat lain, atau lanjut ke Tahap 3?",
+        IntakeState.CHRONOLOGY: "Sekarang Tahap 3. Ceritakan singkat bagaimana penipuan terjadi serta tanggal dan jamnya. Saya akan merapikan cerita Anda tanpa menambah fakta.",
+        IntakeState.POLICE: "Apakah Anda memiliki file Laporan Kepolisian? Unggah gambar melalui lampiran atau pilih Lewati / Belum Ada.",
+        IntakeState.ACCOUNT: "Kita masuk Tahap 4. Kirim foto atau screenshot bukti kepemilikan rekening Anda, misalnya info rekening m-banking atau buku tabungan.",
+        IntakeState.TRANSFER: "Rekening Anda sudah tercatat. Sekarang kirim screenshot bukti transfer ke rekening pelaku.",
+        IntakeState.TRANSFER_MORE: transfer_message,
+        IntakeState.CONFIRM: f"Tahap 1–4 lengkap. Periksa ringkasan. Dengan mengirim jawaban CAPTCHA {session.captcha_question}, saya menyetujui S&K simulasi lokal dan menyelesaikan laporan dummy. Tiket yang dihasilkan hanya lokal; tidak ada pengiriman resmi atau pemblokiran dana.",
+        IntakeState.COMPLETED: "Laporan dummy selesai. Tiket simulasi lokal sudah dibuat; laporan resmi tidak dikirim dan tidak ada dana diblokir.",
+    }
+    replies = {
+        IntakeState.STATUS: [("Ya, saya sendiri", "Ya, saya sendiri"), ("Tidak, saya mewakili korban", "Tidak, saya mewakili korban")],
+        IntakeState.CHAT_MORE: [("+ Upload Bukti Chat Lain", "more_chat"), ("Lanjut ke Tahap 3", "continue")],
+        IntakeState.POLICE: [("Lewati / Belum Ada", "skip_police")],
+        IntakeState.TRANSFER_MORE: [("+ Upload Bukti Transfer Lain", "more_transfer"), ("Lanjut ke Tahap 5", "continue")],
+    }
+    return messages.get(state, "Silakan lengkapi informasi yang diminta."), [{"label": label, "value": value} for label, value in replies.get(state, [])]
+
+
+def snapshot(session, *, simulated=True, before=None):
+    advance(session)
+    missing = current_errors(session)
+    message, replies = turn_message(session, missing)
+    if missing and missing[0]["reason"] == "low_confidence":
+        replies = [{"label": "Sudah sesuai", "value": "confirm_value"}]
+    return {
+        "session_id": session.session_id, "state": session.state, "current_state": session.state,
+        "active_wizard_step": TURN_STEPS[session.state], "expected_upload_type": UPLOAD_STATES.get(session.state),
+        "assistant_message": message, "reply": message, "question": message, "quick_replies": replies,
+        "dom_patches": changed_patches(before, session.data) if before is not None else [],
+        "data": deepcopy(session.data), "missing_slots": missing,
+        "missing_evidence": [kind for kind in EVIDENCE_KINDS if kind not in session.evidence],
+        "next_slot": missing[0]["path"] if missing else None,
+        "ready_for_confirmation": session.state == IntakeState.CONFIRM, "confirmed": session.confirmed,
+        "confidence": dict(session.confidence), "sources": dict(session.sources), "ekyc": session.ekyc,
         "evidence": [{"kind": kind, **meta} for kind, meta in session.evidence.items()],
         "captcha_question": session.captcha_question, "simulation": simulated,
-        "integration_mode": "dom", "external_dispatch_enabled": False,
+        "integration_mode": "dom", "external_dispatch_enabled": False, "submitted": False,
         "elapsed_seconds": round(time.monotonic() - session.started, 2), "revision": session.revision,
+        "result": session.dispatch,
     }
 
 

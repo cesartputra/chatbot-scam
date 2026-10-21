@@ -29,12 +29,13 @@ from services.llm_gateway import GatewayError, LLMGatewayService
 from services.orchestrator import (
     EVIDENCE_KINDS, IntakeState, SESSIONS, advance, apply_patch, build_report,
     flattened, get_path, invalidate, new_session, rate_limit, session_for,
-    set_path, snapshot, stage_errors, sync_derived,
+    set_path, snapshot, stage_errors, sync_derived, UPLOAD_STATES, current_errors,
+    prepare_confirmation, normalize_patch,
 )
 
 app.title = "IASC Local Replica · Hybrid AI Intake"
 app.version = "1.0.0-poc"
-app.description = "Lima tahap formulir dan Hybrid OCR + Chat. Seluruh tiket dan freeze adalah simulasi lokal."
+app.description = "Help Center percakapan dengan pengisian formulir lima tahap secara progresif. Seluruh tiket adalah simulasi lokal tanpa tindakan bank."
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "[::1]", "testserver"])
 UPLOAD_CONCURRENCY = asyncio.Semaphore(2)
 
@@ -51,7 +52,7 @@ async def local_boundaries(request: Request, call_next):
         origin = request.headers.get("origin")
         if origin and origin != str(request.base_url).rstrip("/"):
             return JSONResponse({"detail": "Gunakan API dari origin layanan intake yang sama."}, status_code=403)
-        maximum = 42 * 1024 * 1024 if request.url.path.endswith("/upload") else 128 * 1024
+        maximum = 11 * 1024 * 1024 if request.url.path.endswith("/upload") else 128 * 1024
         length = request.headers.get("content-length")
         if length is None and request.method != "DELETE":
             return JSONResponse({"detail": "Content-Length wajib disertakan."}, status_code=411)
@@ -67,8 +68,8 @@ def gateway():
         raise HTTPException(503, str(exc)) from None
 
 
-def view(session):
-    return snapshot(session, simulated=getattr(session, "simulated_extraction", True))
+def view(session, before=None):
+    return snapshot(session, simulated=getattr(session, "simulated_extraction", True), before=before)
 
 
 class InputModel(BaseModel):
@@ -79,6 +80,7 @@ class ChatInput(InputModel):
     text: str = Field(default="", max_length=8000)
     values: dict[str, object] = Field(default_factory=dict, max_length=100)
     confirm: StrictBool = False
+    action: str = Field(default="", max_length=40)
 
 
 class EKYCInput(InputModel):
@@ -104,7 +106,7 @@ async def initialize():
 async def read_session_v1(session_id: str):
     session = session_for(session_id)
     async with session.lock:
-        return view(session)
+        return view(session, before={})
 
 
 @app.delete("/api/v1/session/{session_id}", status_code=204)
@@ -114,65 +116,119 @@ async def delete_session_v1(session_id: str):
         del SESSIONS[session_id]
 
 
+def candidate_session(session):
+    candidate = copy(session)
+    for name in ("data", "confidence", "sources", "files", "evidence", "ekyc", "dispatch"):
+        setattr(candidate, name, deepcopy(getattr(session, name)))
+    return candidate
+
+
+def commit_session(session, candidate):
+    for name, value in candidate.__dict__.items():
+        if name not in {"lock", "mutations", "touched"}:
+            setattr(session, name, value)
+
+
+def remap_evidence(session, kind, values, confidences, metadata):
+    """Append new evidence rows; a second transfer must not replace the first."""
+    pointers = smart_file_reuse(kind, metadata)
+    if kind == "bukti_chat":
+        values = {path: value for path, value in values.items() if path.startswith("tahap2.")}
+        pointers = {path: value for path, value in pointers.items() if path.startswith("tahap2.")}
+        offsets = {name: len(session.data["tahap2"].get(name, [])) for name in ("daftar_informasi_terlapor", "daftar_sumber_media_penipuan")}
+        def target(path):
+            parts = path.split(".")
+            parts[2] = str(int(parts[2]) + offsets[parts[1]])
+            return ".".join(parts)
+    elif kind == "bukti_transfer":
+        prefix = "tahap4.daftar_penyelenggara_terlapor."
+        values = {path: value for path, value in values.items() if path.startswith(prefix)}
+        normalized = normalize_patch(values)
+        rows = session.data["tahap4"].get("daftar_penyelenggara_terlapor", [])
+        bank = normalized.get(prefix + "0.nama_penyelenggara")
+        account = normalized.get(prefix + "0.nomor_rekening_akun")
+        row_index = next((index for index, row in enumerate(rows) if bank and account and row.get("nama_penyelenggara") == bank and row.get("nomor_rekening_akun") == account), len(rows))
+        detail_index = len(rows[row_index].get("daftar_rincian_transaksi", [])) if row_index < len(rows) else 0
+        if row_index < len(rows):
+            values = {path: value for path, value in values.items()
+                      if ".daftar_rincian_transaksi." in path or get_path(session.data, prefix + str(row_index) + "." + path.split(".")[-1]) is None}
+        def target(path):
+            parts = path.split(".")
+            parts[2] = str(row_index + int(parts[2]))
+            if len(parts) > 4 and parts[3] == "daftar_rincian_transaksi":
+                parts[4] = str(detail_index + int(parts[4]))
+            return ".".join(parts)
+    else:
+        stage = "tahap1." if kind == "ktp" else "tahap4."
+        values = {path: value for path, value in values.items() if path.startswith(stage) and path != "tahap1.apakah_mengalami_sendiri"}
+        target = lambda path: path
+    return ({target(path): value for path, value in values.items()},
+            {target(path): confidences[path] for path in values},
+            {target(path): value for path, value in pointers.items()})
+
+
 @app.post("/api/v1/session/{session_id}/upload")
-async def upload_evidence(
-    session_id: str,
-    ktp: UploadFile | None = File(None), bukti_transfer: UploadFile | None = File(None),
-    bukti_chat: UploadFile | None = File(None), bukti_rekening_korban: UploadFile | None = File(None),
-):
+async def upload_evidence(session_id: str, file: UploadFile = File(...)):
     session = session_for(session_id)
-    uploads = {key: value for key, value in locals().items() if key in EVIDENCE_KINDS and value is not None}
-    if not uploads:
-        raise HTTPException(422, "Pilih minimal satu gambar bukti.")
     async with session.lock:
         rate_limit(session)
-        if len(session.files) + len(uploads) > 12:
-            raise HTTPException(413, "Batas 12 unggahan per sesi. Mulai sesi baru untuk mengganti seluruh bukti.")
+        kind = UPLOAD_STATES.get(session.state)
+        if not kind:
+            await file.close()
+            raise HTTPException(409, "Jawab pertanyaan saat ini terlebih dahulu; belum ada dokumen yang diminta.")
+        if len(session.files) >= 12:
+            await file.close()
+            raise HTTPException(413, "Batas 12 unggahan per sesi. Mulai sesi baru untuk bukti tambahan.")
         llm = gateway()
-        async def extract_one(kind, file):
-            async with UPLOAD_CONCURRENCY:
-                try:
-                    raw = await file.read(10 * 1024 * 1024 + 1)
-                    image = await run_in_threadpool(process_image, raw, file.filename or "bukti", file.content_type or "")
-                    result = await llm.extract(kind, image.data, image.mime_type)
-                    return kind, image, result
-                finally:
-                    await file.close()
         try:
-            results = await asyncio.gather(*(extract_one(kind, file) for kind, file in uploads.items()), return_exceptions=True)
-            for result in results:
-                if isinstance(result, Exception):
-                    raise result
+            async with UPLOAD_CONCURRENCY:
+                raw = await file.read(10 * 1024 * 1024 + 1)
+                image = await run_in_threadpool(process_image, raw, file.filename or "bukti", file.content_type or "")
+                result = None if kind == "laporan_kepolisian" else await llm.extract(kind, image.data, image.mime_type)
         except (ImageProcessingError, GatewayError) as exc:
             raise HTTPException(422 if isinstance(exc, ImageProcessingError) else 502, str(exc)) from None
-        candidate = copy(session)
-        for name in ("data", "confidence", "sources", "files", "evidence"):
-            setattr(candidate, name, deepcopy(getattr(session, name)))
+        finally:
+            await file.close()
+        candidate = candidate_session(session)
+        before = deepcopy(session.data)
         invalidate(candidate)
-        for kind, image, result in results:
-            file_id = secrets.token_urlsafe(24)
-            metadata = FileMetadata(file_id=file_id, filename=image.filename, content_type=image.mime_type, size_bytes=image.size, sha256=image.sha256, url=f"/api/v1/session/{session_id}/files/{file_id}").model_dump(mode="json")
-            candidate.files[file_id] = {"metadata": metadata, "data": image.data}
-            candidate.evidence[kind] = metadata
-            # Replacement evidence invalidates its old extracted facts, preserving human corrections.
-            for path in list(candidate.sources):
-                if candidate.sources[path].endswith(":" + kind):
-                    set_path(candidate.data, path, None)
-                    candidate.confidence.pop(path, None)
-                    candidate.sources.pop(path, None)
-            source = ("simulation:" if result.simulated else "vision:") + kind
-            apply_patch(candidate, result.values, result.confidence, source)
-            for path, file in smart_file_reuse(kind, metadata).items():
-                set_path(candidate.data, path, file)
-            if kind == "ktp":
-                candidate.observed_identity_name = result.values.get("tahap1.nama_pelapor")
-            if kind == "bukti_rekening_korban":
-                candidate.observed_account_name = result.values.get("tahap4.nama_pemilik_rekening_akun_korban")
+        file_id = secrets.token_urlsafe(24)
+        metadata = FileMetadata(file_id=file_id, filename=image.filename, content_type=image.mime_type, size_bytes=image.size, sha256=image.sha256, url=f"/api/v1/session/{session_id}/files/{file_id}").model_dump(mode="json")
+        candidate.files[file_id] = {"metadata": deepcopy(metadata), "data": image.data}
+        candidate.evidence[kind] = metadata
+        if result:
+            values, confidence, pointers = remap_evidence(candidate, kind, result.values, result.confidence, metadata)
+            apply_patch(candidate, values, confidence, ("simulation:" if result.simulated else "vision:") + kind)
+        else:
+            pointers = smart_file_reuse(kind, metadata)
+        for path, reference in pointers.items():
+            set_path(candidate.data, path, reference)
+        if kind == "ktp":
+            candidate.observed_identity_name = result.values.get("tahap1.nama_pelapor")
+            for path, value in {"tahap1.kewarganegaraan_pelapor": "Indonesia", "tahap1.kode_negara_telepon_pelapor": "Indonesia (+62)", "tahap1.jenis_identitas": "KTP"}.items():
+                if not get_path(candidate.data, path):
+                    set_path(candidate.data, path, value)
+            candidate.state = IntakeState.PELAPOR
+        elif kind == "bukti_chat":
+            candidate.state = IntakeState.TERLAPOR
+        elif kind == "bukti_rekening_korban":
+            candidate.observed_account_name = result.values.get("tahap4.nama_pemilik_rekening_akun_korban")
+            if not get_path(candidate.data, "tahap4.nama_pemilik_rekening_akun_korban"):
+                path = "tahap4.nama_pemilik_rekening_akun_korban"
+                set_path(candidate.data, path, get_path(candidate.data, "tahap1.nama_pelapor"))
+                candidate.confidence[path] = 0.0
+                candidate.sources[path] = "default"
+            candidate.state = IntakeState.ACCOUNT_DETAILS
+        elif kind == "bukti_transfer":
+            candidate.state = IntakeState.TRANSFER_DETAILS
+        else:
+            candidate.state = IntakeState.ACCOUNT
+        candidate.simulated_extraction = llm.simulated
         sync_derived(candidate)
-        for name in ("data", "confidence", "sources", "files", "evidence", "confirmed", "ekyc", "revision", "dispatch", "observed_identity_name", "observed_account_name"):
-            setattr(session, name, getattr(candidate, name))
-        session.simulated_extraction = llm.simulated
-        return {**view(session), "reply": "Bukti telah diproses. " + ("Hasil dummy terprogram; bukan OCR nyata. " if llm.simulated else "Periksa hasil ekstraksi gambar. ")}
+        advance(candidate)
+        response = view(candidate, before)
+        commit_session(session, candidate)
+        return response
 
 
 @app.get("/api/v1/session/{session_id}/files/{file_id}")
@@ -189,31 +245,91 @@ async def chat_v1(session_id: str, body: ChatInput):
     session = session_for(session_id)
     async with session.lock:
         rate_limit(session)
-        if body.confirm:
+        candidate = candidate_session(session)
+        before = deepcopy(session.data)
+        advance(candidate)
+        text = body.text.strip()
+        action = body.action or text
+        normalized = action.casefold()
+        try:
             if body.values:
-                raise HTTPException(422, "Simpan koreksi terlebih dahulu, lalu konfirmasikan ringkasan.")
-            advance(session)
-            if session.state != IntakeState.CONFIRM:
-                raise HTTPException(409, "Lengkapi seluruh bukti, kolom, dan confidence sebelum konfirmasi.")
-            session.confirmed = True
-            return view(session)
-        if body.values:
-            apply_patch(session, body.values, {}, "manual", manual=True)
-        elif body.text:
-            missing = [item["path"] for item in stage_errors(session)]
-            from services.llm_gateway import _path_allowed
-            allowed = [path for path in missing if _path_allowed(path)]
-            if not allowed:
-                raise HTTPException(409, "Unggah bukti yang masih kurang atau tinjau ringkasan.")
-            try:
-                result = await gateway().extract_chat(body.text, allowed, {"values": dict(flattened(session.data))})
-            except GatewayError as exc:
-                raise HTTPException(422, str(exc)) from None
-            # A direct field edit confirms a value; an LLM interpretation retains its uncertainty.
-            apply_patch(session, result.values, result.confidence, "chat" if result.simulated else "chat_ai", manual=result.simulated)
-        else:
-            raise HTTPException(422, "Isi jawaban atau koreksi kolom.")
-        return view(session)
+                if body.confirm:
+                    raise HTTPException(422, "Simpan koreksi terlebih dahulu sebelum konfirmasi.")
+                was_final = candidate.state in {IntakeState.CONFIRM, IntakeState.COMPLETED}
+                apply_patch(candidate, body.values, {}, "manual", manual=True)
+                if was_final:
+                    prepare_confirmation(candidate)
+            elif candidate.state == IntakeState.STATUS:
+                if normalized in {"ya, saya sendiri", "ya", "sendiri", "saya sendiri"}:
+                    status = "Ya, saya sendiri"
+                elif normalized in {"tidak, saya mewakili korban", "tidak", "mewakili", "saya mewakili korban"}:
+                    status = "Tidak, saya mewakili korban"
+                else:
+                    raise HTTPException(422, "Pilih apakah Anda mengalami sendiri atau mewakili korban.")
+                apply_patch(candidate, {"tahap1.apakah_mengalami_sendiri": status}, {}, "manual", manual=True)
+                candidate.state = IntakeState.KTP
+            elif current_errors(candidate) and action == "confirm_value" and current_errors(candidate)[0]["reason"] == "low_confidence":
+                path = current_errors(candidate)[0]["path"]
+                apply_patch(candidate, {path: get_path(candidate.data, path)}, {}, "manual", manual=True)
+            elif candidate.state == IntakeState.CONTACT:
+                result = await gateway().extract_contacts(text)
+                if not result.values:
+                    raise HTTPException(422, "Ketik nomor telepon aktif dan email Anda.")
+                apply_patch(candidate, result.values, result.confidence, "chat" if result.simulated else "chat_ai", manual=result.simulated)
+            elif candidate.state == IntakeState.CHAT_MORE:
+                if action == "more_chat" or "bukti chat lain" in normalized:
+                    candidate.state = IntakeState.CHAT
+                elif action == "continue" or "lanjut" in normalized:
+                    candidate.state = IntakeState.CHRONOLOGY
+                else:
+                    raise HTTPException(422, "Pilih bukti chat lain atau lanjut ke Tahap 3.")
+                candidate.revision += 1
+            elif candidate.state == IntakeState.CHRONOLOGY:
+                result = await gateway().synthesize_chronology(text, {"values": dict(flattened(candidate.data))})
+                if not result.values.get("tahap3.kronologi_kejadian_penipuan"):
+                    raise HTTPException(422, "Ceritakan kronologi singkat Anda terlebih dahulu.")
+                apply_patch(candidate, result.values, result.confidence, "chat" if result.simulated else "chat_ai", manual=result.simulated)
+                set_path(candidate.data, "tahap3.upload_bukti_pendukung_kejadian", candidate.evidence["bukti_chat"])
+                candidate.chronology_received = True
+                candidate.state = IntakeState.KEJADIAN
+            elif candidate.state == IntakeState.POLICE:
+                if action == "skip_police" or any(word in normalized for word in ("lewati", "belum", "tidak ada")):
+                    candidate.data["tahap3"]["upload_laporan_kepolisian"] = None
+                    candidate.state = IntakeState.ACCOUNT
+                    candidate.revision += 1
+                else:
+                    raise HTTPException(422, "Unggah gambar laporan polisi melalui lampiran atau pilih Lewati / Belum Ada.")
+            elif candidate.state == IntakeState.TRANSFER_MORE:
+                if action == "more_transfer" or "transfer lain" in normalized:
+                    candidate.state = IntakeState.TRANSFER
+                elif action == "continue" or "lanjut" in normalized:
+                    prepare_confirmation(candidate)
+                else:
+                    raise HTTPException(422, "Pilih bukti transfer lain atau lanjut ke Tahap 5.")
+                candidate.revision += 1
+            elif candidate.state == IntakeState.CONFIRM:
+                if body.confirm:
+                    candidate.confirmed = True
+                else:
+                    await finish_local(candidate, text)
+            elif candidate.state == IntakeState.COMPLETED:
+                raise HTTPException(409, "Laporan dummy sudah selesai. Buat sesi baru untuk laporan lain.")
+            elif current_errors(candidate):
+                item = current_errors(candidate)[0]
+                path = item["path"]
+                if action == "confirm_value" and item["reason"] == "low_confidence":
+                    apply_patch(candidate, {path: get_path(candidate.data, path)}, {}, "manual", manual=True)
+                else:
+                    result = await gateway().extract_chat(text, [path], {"values": dict(flattened(candidate.data))})
+                    apply_patch(candidate, result.values, result.confidence, "chat" if result.simulated else "chat_ai", manual=result.simulated)
+            else:
+                raise HTTPException(409, "Silakan unggah satu dokumen yang sedang diminta melalui tombol lampiran.")
+        except GatewayError as exc:
+            raise HTTPException(422, str(exc)) from None
+        advance(candidate)
+        response = view(candidate, before)
+        commit_session(session, candidate)
+        return response
 
 
 def normalized_name(value):
@@ -226,8 +342,8 @@ async def verify_ekyc(session_id: str, body: EKYCInput):
     async with session.lock:
         rate_limit(session)
         advance(session)
-        if session.state != IntakeState.EKYC:
-            raise HTTPException(409, "Konfirmasikan ringkasan lengkap sebelum verifikasi.")
+        if session.state not in {IntakeState.CONFIRM, IntakeState.COMPLETED}:
+            raise HTTPException(409, "Lengkapi ringkasan terlebih dahulu untuk pemeriksaan simulasi opsional.")
         if not body.simulate:
             raise HTTPException(501, "Adapter e-KYC nyata belum dikonfigurasi. Skor browser tidak boleh dianggap biometrik asli.")
         if get_path(session.data, "tahap1.apakah_mengalami_sendiri") != "Ya, saya sendiri":
@@ -278,7 +394,7 @@ def dom_mapping(payload):
         "attachments": [{"path": path, "phase": int(path[5]), "selector": f'[data-file="{name}"]', "file": get_path(payload, path)} for path, name in LOCAL_FILES.items() if get_path(payload, path)],
         "collections": {"informasi_terlapor": payload["tahap2"]["daftar_informasi_terlapor"], "sumber_media": payload["tahap2"]["daftar_sumber_media_penipuan"], "penyelenggara_terlapor": payload["tahap4"]["daftar_penyelenggara_terlapor"]},
         "adapter_event": "iasc-intake:apply-v1",
-        "note": "Adapter merender fase dan baris modal dari payload bertipe. Consent/CAPTCHA host tidak diisi. Selector/ID backend resmi memerlukan kontrak dari pemilik ASP.NET.",
+        "note": "Adapter merender fase dan baris modal dari payload bertipe. Consent/CAPTCHA hanya untuk simulasi lokal. Selector/ID backend resmi memerlukan kontrak dari pemilik ASP.NET.",
     }
 
 
@@ -311,34 +427,49 @@ async def dispatch_webhook(payload, session):
         raise HTTPException(502, "Webhook mock gagal. Status belum dianggap selesai; ulangi dengan sesi yang sama.") from None
 
 
+async def finish_local(session, answer, *, mode="local"):
+    if session.captcha_attempts >= 5:
+        raise HTTPException(429, "Batas percobaan CAPTCHA tercapai. Mulai sesi baru.")
+    if not re.fullmatch(r"[0-9]{1,3}", answer) or answer != str(sum(session.challenge)):
+        # Attempts are committed even when the remainder of the turn fails.
+        SESSIONS[session.session_id].captcha_attempts += 1
+        raise HTTPException(422, "Jawaban CAPTCHA simulasi lokal salah.")
+    if session.dispatch:
+        return
+    if stage_errors(session) or not session.chronology_received:
+        raise HTTPException(409, "Lengkapi seluruh tahap dan kronologi sebelum menyelesaikan demo.")
+    try:
+        payload = build_report(session, True, answer).model_dump(mode="json")
+    except ValidationError:
+        raise HTTPException(422, "Laporan belum sesuai kontrak lengkap lima tahap.") from None
+    if mode == "webhook":
+        result = await dispatch_webhook(payload, session)
+    else:
+        ticket = "SIM-" + hashlib.sha256((session.session_id + "_" + str(session.revision)).encode()).hexdigest()[:12].upper()
+        result = {"ticket_number": ticket, "freeze_status": "SIMULATED_NO_BANK_ACTION", "simulated": True, "submitted": False, "amount_ring_fencing": "NOT_EXECUTED", "multi_hop_tracing": "NOT_EXECUTED"}
+    session.data["tahap5"] = payload["tahap5"]
+    session.revision += 1
+    session.dispatch = {**result, "integration_mode": mode}
+    if mode == "dom":
+        session.dispatch["dom_mapping"] = dom_mapping(payload)
+    session.state = IntakeState.COMPLETED
+
+
 @app.post("/api/v1/session/{session_id}/submit")
 async def submit_v1(session_id: str, body: SubmitInput):
     session = session_for(session_id)
     async with session.lock:
         rate_limit(session)
-        advance(session)
-        if session.state != IntakeState.DISPATCH or not session.ekyc.get("verified"):
-            raise HTTPException(409, "Konfirmasi ringkasan dan verifikasi simulasi terlebih dahulu.")
+        if session.state not in {IntakeState.CONFIRM, IntakeState.COMPLETED}:
+            raise HTTPException(409, "Lengkapi lima tahap percakapan terlebih dahulu.")
         if body.setuju_syarat_dan_ketentuan is not True:
-            raise HTTPException(422, "Persetujuan simulasi wajib dicentang oleh pengguna.")
-        if session.captcha_attempts >= 5:
-            raise HTTPException(429, "Batas percobaan CAPTCHA tercapai. Mulai sesi baru.")
-        if body.captcha_answer != str(sum(session.challenge)):
-            session.captcha_attempts += 1
-            raise HTTPException(422, "Jawaban CAPTCHA lokal salah.")
-        if session.dispatch and session.dispatch["integration_mode"] == body.integration_mode:
-            return session.dispatch
-        try:
-            payload = build_report(session, body.setuju_syarat_dan_ketentuan, body.captcha_answer).model_dump(mode="json")
-        except ValidationError:
-            raise HTTPException(422, "Laporan belum sesuai kontrak lengkap lima tahap.") from None
-        if body.integration_mode == "dom":
-            result = {"mode": "DOM_AUTOFILL", "dom_mapping": dom_mapping(payload), "submitted": False, "simulated": True, "freeze_status": "NOT_REQUESTED"}
-        else:
-            result = {"mode": "WEBHOOK_MOCK", **await dispatch_webhook(payload, session)}
-        session.data["tahap5"] = payload["tahap5"]
-        session.dispatch = {**result, "integration_mode": body.integration_mode, "data": payload, "ekyc": session.ekyc}
-        return session.dispatch
+            raise HTTPException(422, "Persetujuan simulasi wajib diberikan oleh pengguna.")
+        before = deepcopy(session.data)
+        candidate = candidate_session(session)
+        await finish_local(candidate, body.captcha_answer, mode=body.integration_mode)
+        response = view(candidate, before)
+        commit_session(session, candidate)
+        return response
 
 
 @app.get("/api/v1/session/{session_id}/status")

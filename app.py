@@ -9,19 +9,18 @@ from pathlib import Path
 import re
 import secrets
 import shutil
-import subprocess
-import tempfile
 import time
 import warnings
 from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
+from services.image_processor import ImageProcessingError, local_ocr_text
 
 ROOT = Path(__file__).resolve().parent
 JAKARTA = timezone(timedelta(hours=7))
@@ -179,19 +178,10 @@ def image_png(raw):
 
 
 def local_ocr(png):
-    binary = shutil.which("tesseract")
-    if not binary:
-        raise HTTPException(503, "Tesseract belum terpasang. Instal Tesseract atau gunakan pengisian manual.")
-    with tempfile.TemporaryDirectory(prefix="iasc-ocr-") as folder:
-        path = Path(folder) / "evidence.png"
-        path.write_bytes(png)
-        try:
-            result = subprocess.run([binary, str(path), "stdout", "-l", "eng", "--psm", "6"], capture_output=True, text=True, timeout=20, env={**os.environ, "OMP_THREAD_LIMIT": "1"})
-        except (subprocess.TimeoutExpired, OSError):
-            raise HTTPException(503, "OCR belum berhasil. Coba gambar yang lebih jelas atau isi lewat chat.") from None
-    if result.returncode:
-        raise HTTPException(503, "OCR tidak dapat membaca gambar. Anda tetap dapat mengisi lewat chat.")
-    return result.stdout[:12000]
+    try:
+        return local_ocr_text(png)
+    except ImageProcessingError as exc:
+        raise HTTPException(503, str(exc)) from None
 
 
 def extract_local(text):
@@ -380,7 +370,7 @@ def delete_session(token: str):
 @app.get("/assistant")
 @app.get("/widget")
 def index():
-    return FileResponse(ROOT / "static/index.html")
+    return RedirectResponse("/Guest/LaporanV2?assistant=1", status_code=307)
 
 
 @app.get("/")

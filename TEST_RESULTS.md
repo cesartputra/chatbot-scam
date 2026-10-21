@@ -1,49 +1,61 @@
 # Hasil verifikasi PoC — 21 Oktober 2026
 
-Build yang diuji memakai entry point `main:app`, FastAPI 0.153.0, Pydantic 2.14.1, Python 3.14.4 pada macOS. Semua data pengujian fiktif. Tidak ada pengiriman laporan ke IASC atau tindakan bank.
+Entry point `main:app`, Python 3.14.4 pada macOS. Seluruh data pengujian fiktif. Tidak ada pengiriman laporan ke IASC atau tindakan bank.
 
 ## Pengujian otomatis
 
 | Suite | Hasil |
 | --- | --- |
-| Python: `python -m unittest discover -s tests -v` | **54 lulus, 0 gagal, 0 skip** |
-| JavaScript: `node --test tests/report-core.test.mjs` | **13 lulus, 0 gagal, 0 skip** |
+| Python: `.venv/bin/python -m pytest -q` | **70 lulus, 65 subtest lulus** |
+| JavaScript: `node --test tests/*.test.mjs` | **24 lulus, 0 gagal** |
 
-Suite Python meliputi:
+Python meliputi:
 
-- Transisi lima state, dua delta slot kontak setelah empat unggahan dummy, kartu konfirmasi, e-KYC simulasi, dan ekspor payload.
-- Mode DOM lokal dan webhook mock; tiket `SIM-…`, idempotensi, dan penolakan URL webhook eksternal sebelum akses jaringan.
-- Seluruh model lima tahap, daftar bersarang, ringkasan transaksi konsisten, batas lampiran 1/2 MiB, tanggal Indonesia, nominal positif/finite, dan preservasi nol awal.
-- Auto-copy kontak tanpa menutupi konfirmasi eksplisit yang berbeda; nama pemilik rekening independen tetap dipertahankan.
-- Kompresi di bawah 900.000 byte, penghapusan metadata, penolakan tipe/isi palsu, file terlalu besar, gambar animasi, dan resolusi berlebih.
-- Smart re-use bukti chat pada tiga kolom, isolasi/expiry/penghapusan sesi, akses file milik sesi, dan penolakan metadata file palsu.
-- Confidence di bawah 0,85 membutuhkan koreksi/konfirmasi; ketidakpastian hasil chat remote dipertahankan. OCR lokasi yang belum terpetakan tetap memerlukan pemeriksaan manusia.
-- Koreksi atomik, identitas Paspor → KTP memerlukan NIK sah, serta penolakan pasangan kota/provinsi dikenal yang bertentangan.
-- Bukti pengganti memperbarui fakta OCR dan menghapus fakta lama yang tidak ditemukan, sambil mempertahankan koreksi manual.
-- Perubahan data membatalkan konfirmasi/e-KYC/dispatch. Tahapan tidak dapat dilewati; skor liveness rendah atau nama bukti berbeda ditolak. e-KYC nyata menghasilkan 501.
-- Persetujuan eksplisit, CAPTCHA terikat sesi, host/origin yang diizinkan, dan respons error yang tidak menggemakan data pribadi.
-- AI Gateway menggunakan respons HTTP tiruan: schema/JSON object, pemilihan model, penolakan field aksi/duplikat/confidence tidak valid, refusal/timeout/error. Kegagalan tidak memunculkan data dummy atau mengubah draft lama.
-- Regresi asisten lama termasuk OCR Tesseract terhadap fixture; jalur ini terpisah dari simulasi v1.
+- Urutan state percakapan dari status pelapor sampai tiket lokal; server menentukan jenis unggahan tunggal dan menolak lompatan tahap.
+- Ekstraksi nomor HP/email dari satu jawaban alami, prefix Indonesia, kontak parsial, nomor di alamat email, dan penolakan kontak ambigu.
+- Kronologi berdasarkan cerita pengguna, tanggal/jam eksplisit, permintaan waktu yang belum disebut, serta penolakan tanggal yang ditambahkan AI.
+- Lampiran laporan polisi opsional atau dilewati; bukti chat dipakai ulang dan chat tambahan menambah baris dengan file yang sesuai.
+- Transfer tambahan menambah rincian pada penerima yang sama atau menambah penerima baru tanpa menghapus transaksi lama.
+- Confidence di bawah 0,85 menahan alur; konfirmasi manusia memperbarui confidence. Ketidakpastian chat remote dipertahankan.
+- Patch leaf per respons, file atomik, nomor/rekening tetap string, nominal Decimal, serta GET snapshot untuk resinkronisasi.
+- Koreksi atomik, pemeliharaan koreksi manual, pembatalan tiket/consent setelah koreksi, dan rollback seluruh unggahan bila gambar/provider gagal.
+- Validasi model lima tahap, ringkasan bersarang, batas lampiran 1/2 MiB, tanggal Indonesia, nominal positif/finite, dan auto-copy kontak.
+- Kompresi di bawah 900.000 byte, penghapusan metadata, tipe palsu, gambar rusak/animasi/terlalu besar, dan batas resolusi.
+- Kepemilikan file per sesi, penolakan metadata palsu, expiry/penghapusan/kapasitas sesi, origin/host, batas permintaan, dan error tanpa echo data pribadi.
+- Jawaban CAPTCHA lokal melalui chat membuat tiket `SIM-…` tanpa akses jaringan; persetujuan eksplisit pada adapter, lima percobaan salah, dan hasil idempoten.
+- Adapter DOM/webhook mock, penolakan endpoint eksternal, e-KYC tiruan opsional, serta regresi API/asisten lama.
+- Gateway HTTP tiruan: schema/JSON object, pemilihan model, field terlarang/duplikat, confidence invalid, refusal/timeout/error. Kegagalan tidak beralih ke dummy.
+- Sumopod: URL/Authorization/model/JSON object, OCR lokal mengirim teks ke model chat tanpa gambar, serta OCR kosong/gagal menghentikan permintaan sebelum provider.
 
-Suite JavaScript meliputi validasi lima fase dan modal transaksi, dokumen perwakilan korban, parsing rupiah, lampiran/tanggal, isian manual yang dipertahankan, pembersihan metadata, pemetaan payload v1 ke replika, tanggal Indonesia, dan masa berlaku object URL bukti yang dipakai bersama, dan round-trip nominal pecahan dua desimal dari payload ke modal. Test tidak menghubungi IASC.
+Node meliputi validasi fase/modal, dokumen perwakilan, parsing nominal dan tanggal, mapping payload lama, shared object URL, serta mapping progresif untuk radio/dropdown/tanggal/file dan koleksi bersarang. Cakupan progresif juga meliputi path/revisi tidak sah, sesi lama, Decimal tanpa kehilangan presisi, konflik manual, reset isian AI saat sesi baru, dan gate hasil simulasi untuk consent/CAPTCHA. Tes tidak menghubungi IASC.
 
-## Pemeriksaan browser pada versi ini
+## Pemeriksaan browser versi percakapan
 
-- Beranda, formulir lima fase, dan widget iframe dimuat dari server lokal.
-- Empat bukti dummy diproses dalam mode simulasi berlabel; ini bukan OCR nyata pada alur v1.
-- Quick reply nomor HP dan email melengkapi dua slot; kartu ringkasan dapat dibuka untuk melihat kelima tahap.
-- Koreksi nominal `-10` ditolak dan nilai draft tetap utuh; koreksi sah `100000` diterima.
-- Konfirmasi ringkasan diikuti simulasi e-KYC berhasil mencapai `STATE_5_DISPATCH_FREEZE`; tantangan CAPTCHA lokal tampil.
-- Pengujian browser sengaja berhenti **sebelum persetujuan, pengisian CAPTCHA, dan auto-fill**. Penerapan bridge penuh belum diverifikasi melalui browser. Mapping seluruh tahap/file dan kedua mode integrasi telah diperiksa melalui test JavaScript/API.
-- Tombol Sesi baru menghapus sesi lama dan kembali ke unggah bukti; diperiksa melalui browser.
-- Peluncur `bash start.sh` diuji; enam route utama mengembalikan HTTP 200 dan widget memakai CSP nonce.
-- Iframe menggunakan izin `allow-forms` agar submit jawaban chat dapat diproses. Tidak ada laporan resmi yang dikirim.
+- Chat memiliki satu lampiran dan satu input teks; quick reply status memulai unggah KTP dummy. Biodata terlihat mengisi radio, tanggal, dropdown dan kolom teks satu per satu; badge melaporkan 12 field yang benar-benar berubah.
+- Satu balasan natural nomor HP dan email mengisi empat kolom kontak/konfirmasi, lalu wizard otomatis pindah ke Tahap 2.
+- Bukti chat menambah baris terlapor dan media beserta lampiran. Cerita khusus penguji tentang tas dipertahankan pada kronologi Tahap 3, tanggal/jam eksplisit terisi, dan bukti komunikasi dipakai ulang.
+- Opsi lewati laporan polisi membuka Tahap 4. Bukti rekening mengisi bank, nomor, pemilik, dan lampiran. Dua unggahan transfer (satu melalui pemilih file) menghasilkan dua rincian Rp100.000 pada penerima yang sama; ringkasan menunjukkan Rp200.000.
+- Tahap 5 menampilkan ringkasan di host dan kartu chat. Persetujuan tetap belum dicentang, jawaban CAPTCHA kosong, dan tombol kirim resmi dinonaktifkan. Pengujian browser berhenti sebelum menjawab CAPTCHA/penyelesaian; tiket lokal lengkap diuji melalui API dan mapping Node, bukan klik browser.
+- Sesi baru membersihkan nama/lampiran hasil AI dan mengunci ulang tahap berikutnya, sambil mempertahankan pekerjaan yang diedit manual.
+- Lampiran pada input native tetap terpasang setelah berpindah tahap dan kembali; diperiksa melalui nilai kontrol file setelah perbaikan render ulang.
+- Screenshot kelima tahap lokal disimpan sebagai artefak pengujian terpisah. Pemeriksaan ini memakai browser in-app pada ukuran default; belum mencakup seluruh perangkat.
+
+Satu warning deprecation Starlette/httpx muncul pada pytest; tidak ada tes gagal.
+
+## Pemeriksaan API Sumopod nyata
+
+- Key hanya berada pada `.env` yang diabaikan Git. `/v1/models` merespons HTTP 200; model yang tersedia pada key pengujian adalah `deepseek-flash`, `deepseek-v4-flash`, dan `deepseek-v4-flash-vision-exp`.
+- Chat `deepseek-v4-flash` menghasilkan ekstraksi nama dummy yang lolos validasi. `gpt-4o-mini` tidak tersedia pada key tersebut.
+- Model vision eksperimental merespons HTTP 401 dengan error autentikasi upstream. Dua alias teks menerima request gambar tetapi tidak mengekstrak field; ini tidak dianggap pembacaan gambar yang berhasil.
+- Konfigurasi eksplisit `VISION_INPUT_MODE=ocr_text` memakai Tesseract lokal lalu `deepseek-v4-flash`. KTP dummy menghasilkan 13 field dan nama yang sesuai fixture; bukti transfer menghasilkan 6 field. Respons nyata ini bukan data simulasi terprogram.
+- Browser dimuat ulang dengan koneksi Sumopod aktif: label Asisten AI tampil, KTP diunggah melalui lampiran tunggal, biodata otomatis terisi, dan chat meminta kontak setelah host mengonfirmasi pengisian.
+- Satu percobaan KTP melewati timeout 35 detik; pengulangan berhasil dalam 19,6 detik. Contoh konfigurasi memakai timeout 60 detik. Target seluruh intake di bawah 45 detik belum terbukti.
 
 ## Yang belum diuji
 
-- Provider/model cloud atau on-premise nyata, passive liveness/keaslian KTP nyata, dan backend ASP.NET IASC.
-- Seluruh variasi struk bank, katalog kota/bank resmi lengkap, PDF extraction, audio/voice transcription, dan laporan perwakilan dengan surat kuasa.
-- Waktu pengisian di bawah 45 detik, akurasi operasional, peluang intersepsi dana, beban produksi, dan ketahanan multi-worker.
-- Kesamaan UI setiap piksel atau seluruh perangkat/browser. Replika mengikuti acuan tampilan, bukan kontrak resmi yang terverifikasi.
+- Provider/model selain uji Sumopod terbatas di atas, on-premise, passive liveness/keaslian KTP, dan backend ASP.NET IASC.
+- Seluruh variasi struk bank, master kota/bank resmi lengkap, ekstraksi PDF, audio/transkripsi, dan verifikasi perwakilan/surat kuasa.
+- Target di bawah 45 detik, akurasi operasional, peluang intersepsi dana, beban produksi, dan ketahanan multi-worker.
+- Kesamaan UI setiap piksel atau semua perangkat/browser. Replika mengikuti acuan tampilan dan belum menjadi kontrak resmi terverifikasi.
 
-Runtime tetap lokal dan tidak mempunyai integrasi pemblokiran dana, amount ring-fencing, ataupun multi-hop tracing. Penanda `verified` pada e-KYC dan tiket mock selalu disertai konteks simulasi; keduanya bukan bukti verifikasi/pelaporan resmi.
+Runtime tetap lokal, satu worker, dengan sesi/file di memori. Tiket `SIM-…`, hasil e-KYC, consent, dan CAPTCHA di sini merupakan simulasi; tidak membuktikan pelaporan resmi, verifikasi identitas, pemblokiran dana, ring-fencing, ataupun multi-hop tracing.

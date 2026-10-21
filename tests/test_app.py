@@ -138,6 +138,8 @@ class IntakeTests(unittest.TestCase):
             result = self.client.get(path)
             self.assertEqual(result.status_code,200,path)
             self.assertEqual(result.headers['cache-control'],'no-store')
+        for path in ['/assistant', '/widget']:
+            self.assertEqual(str(self.client.get(path).url).split('testserver')[-1], '/Guest/LaporanV2?assistant=1')
 
 
 def httpx_response(content):

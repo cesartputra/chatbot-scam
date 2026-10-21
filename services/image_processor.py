@@ -3,6 +3,11 @@
 from dataclasses import dataclass
 import hashlib
 import io
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 import warnings
 
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -17,6 +22,22 @@ class ImageProcessingError(ValueError):
     pass
 
 
+def local_ocr_text(image_bytes: bytes) -> str:
+    binary = shutil.which("tesseract")
+    if not binary:
+        raise ImageProcessingError("Tesseract belum terpasang. Instal Tesseract atau gunakan pengisian manual.")
+    with tempfile.TemporaryDirectory(prefix="iasc-ocr-") as folder:
+        path = Path(folder) / "evidence.png"
+        path.write_bytes(image_bytes)
+        try:
+            result = subprocess.run([binary, str(path), "stdout", "-l", "eng", "--psm", "6"], capture_output=True, text=True, timeout=20, env={**os.environ, "OMP_THREAD_LIMIT": "1"})
+        except (subprocess.TimeoutExpired, OSError):
+            raise ImageProcessingError("OCR belum berhasil. Coba gambar yang lebih jelas atau isi lewat chat.") from None
+    if result.returncode:
+        raise ImageProcessingError("OCR tidak dapat membaca gambar. Anda tetap dapat mengisi lewat chat.")
+    return result.stdout[:12000]
+
+
 @dataclass(frozen=True)
 class ProcessedFile:
     data: bytes
@@ -29,6 +50,7 @@ class ProcessedFile:
 # One stored object can satisfy multiple form fields without duplicating uploads.
 SMART_POINTERS = {
     "ktp": ("tahap1.upload_kartu_identitas_korban",),
+    "laporan_kepolisian": ("tahap3.upload_laporan_kepolisian",),
     "bukti_chat": (
         "tahap2.daftar_informasi_terlapor.0.upload_bukti_komunikasi",
         "tahap2.daftar_sumber_media_penipuan.0.upload_bukti_sumber_media",

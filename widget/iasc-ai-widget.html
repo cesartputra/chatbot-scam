@@ -1,142 +1,214 @@
 <!doctype html>
-<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>Asisten Pelaporan IASC · Simulasi Lokal</title>
+<html lang="id">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>Help Center IASC · Simulasi Lokal</title>
 <style>
-:root{font-family:Arial,'Segoe UI',sans-serif;color:#252a2b;background:#f7f7f5;--wine:#660000;--muted:#697170;--line:#dedfdb}*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;font-size:13px;line-height:1.5}button,input,textarea,select{font:inherit}button{cursor:pointer}button:disabled{cursor:wait;opacity:.55}button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,summary:focus-visible{outline:3px solid #a17222;outline-offset:3px}button.primary{color:white;background:var(--wine);border:1px solid var(--wine)}button.secondary{background:white;color:var(--wine);border:1px solid #d3b8b8}button{border-radius:8px;padding:10px 13px;font-weight:600}a{color:var(--wine)}.demo-banner{background:#fff5d9;color:#6a561c;font-size:10px;text-align:center;padding:7px 10px;border-bottom:1px solid #e9ddb6}.heading{display:flex;gap:12px;padding:16px 18px;background:white;border-bottom:1px solid var(--line)}.mark{background:var(--wine);color:white;border-radius:12px;width:36px;height:36px;display:grid;place-items:center;font-size:19px}.heading h1{font-size:15px;margin:0 0 2px}.heading p{margin:0;font-size:11px;color:var(--muted)}.status-row{display:flex;align-items:center;gap:8px;padding:10px 18px;background:#f3f7f3;border-bottom:1px solid var(--line);font-size:11px}.dot{width:7px;height:7px;background:#4b7753;border-radius:50%}.status-row button{margin-left:auto;background:none;border:0;padding:0 2px;color:var(--wine);font-size:11px}.state-dots{display:flex;gap:5px;margin:12px 18px}.state-dot{flex:1;background:#dfe2de;height:4px;border-radius:6px}.state-dot.done{background:var(--wine)}main{max-width:760px;margin:auto;padding:0 14px 20px}.bubble{padding:13px 14px;background:white;border:1px solid #e0e1de;border-radius:2px 13px 13px 13px;margin:12px 0}.bubble p{margin:0 0 8px}.bubble p:last-child{margin-bottom:0}.muted{font-size:11px;color:var(--muted)}.section-title{font-size:12px;margin:18px 0 8px;font-weight:700}.upload-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.upload-tile{border:1px dashed #c3c7c1;border-radius:10px;background:#fff;padding:12px 10px;min-width:0}.upload-tile span{display:block;font-size:12px;font-weight:600;margin-bottom:7px}.upload-tile small{display:block;color:var(--muted);font-size:10px;margin:5px 0}.upload-tile input{max-width:100%;font-size:10px;color:#606a60}.upload-tile input::file-selector-button{border:0;border-radius:4px;padding:6px;margin-right:5px;color:var(--wine);background:#f6eeee}.upload-tile .selected{font-size:10px;overflow-wrap:anywhere;color:#3e6947}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}.row>button{flex:1}.row a{font-size:10px}.note{font-size:10px;line-height:1.5;color:#676853;margin:10px 0}.proof{margin:8px 0;padding:8px 10px;border:1px solid #dce5da;background:#f2f7f1;font-size:10px;border-radius:7px;overflow-wrap:anywhere}.error{background:#fff0ef;color:#8b2222;border:1px solid #e5b4af;padding:10px 12px;border-radius:8px;margin:12px 0;white-space:pre-wrap;overflow-wrap:anywhere}.success{background:#edf5eb;border:1px solid #c2d6be;color:#33572e;padding:12px;border-radius:8px}.slot-count{font-size:10px;background:#f7ebeb;color:var(--wine);border-radius:15px;padding:3px 8px;display:inline-block}.field-label{display:block;font-weight:600;font-size:12px;margin:10px 0 5px}input[type=text],input[type=number],input[type=email],input[type=tel],textarea,select{border:1px solid #cbd0c8;border-radius:7px;background:white;padding:10px;width:100%;min-height:40px}textarea{resize:vertical;min-height:80px}.quick{display:flex;gap:7px;flex-wrap:wrap;margin:8px 0}.quick button{border:1px solid #ddc9c9;background:#fff;color:var(--wine);font-size:11px;font-weight:400;padding:7px 9px;border-radius:20px}.chat-log:empty{display:none}.chat-item{padding:9px 12px;background:#f0e7e7;border-radius:11px 2px 11px 11px;margin:8px 0 8px 25px;font-size:11px;overflow-wrap:anywhere;white-space:pre-wrap}.summary-head{background:#f4eceb;padding:13px 14px;border-radius:9px 9px 0 0;border:1px solid #e0d2d0}.summary-head strong{font-size:13px}.summary-head p{font-size:10px;margin:4px 0 0}.summary-body{background:white;border:1px solid #e0d2d0;border-top:0;border-radius:0 0 9px 9px;padding:12px}.summary-body dl{margin:0;display:grid;grid-template-columns:42% 58%;gap:6px;font-size:11px}.summary-body dt{color:var(--muted)}.summary-body dd{margin:0;overflow-wrap:anywhere;font-weight:600}.summary-body h3{font-size:11px;color:var(--wine);border-top:1px solid #eee;padding-top:10px;margin:12px 0 7px}.summary-body h3:first-child{margin-top:0;border:0;padding-top:0}.summary-body .edit-row{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:10px;border-bottom:1px solid #eee;padding:7px 0}.edit-row span{overflow-wrap:anywhere}.edit-row button{border:0;background:#f8f1ef;padding:4px 8px;color:var(--wine);font-size:10px;flex-shrink:0}.summary-body details{margin-top:12px}.summary-body summary{font-size:11px;color:var(--wine);cursor:pointer;font-weight:600}.kyc-card{padding:14px;background:white;border:1px solid #dce1d8;border-radius:10px}.kyc-icon{width:48px;height:48px;border:2px dashed #779477;border-radius:50%;display:grid;place-items:center;font-size:24px;margin-bottom:8px}.terms{display:flex;align-items:flex-start;gap:8px;margin:12px 0;font-size:11px}.terms input{margin-top:3px;accent-color:var(--wine)}.captcha{display:flex;align-items:center;gap:12px}.captcha code{font-size:18px;letter-spacing:2px;background:repeating-linear-gradient(30deg,#eee 0 1px,#faf9f5 1px 8px);padding:12px;white-space:nowrap;border-radius:6px;color:#3d433e}.captcha input{max-width:140px}footer{font-size:9px;color:#7c8076;text-align:center;padding:12px 15px;border-top:1px solid #e6e6df}.busy-indicator{padding:8px 18px;font-size:11px;color:var(--wine);background:#fff4ec}.standalone{position:fixed;inset:0;background:white;display:flex;flex-direction:column}.standalone iframe{width:100%;height:100%;min-height:0;flex:1;border:0}.standalone-note{background:#fff5d9;padding:9px 14px;font-size:11px;width:100%}.editor{margin-top:10px;padding:10px;background:#f9f6f2;border-radius:8px}progress{width:100%;height:5px;accent-color:var(--wine)}@media(max-width:350px){.upload-grid{grid-template-columns:1fr}.heading{padding:12px}.summary-body dl{grid-template-columns:1fr}.summary-body dd{margin-bottom:5px}}@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
-</style></head><body>
-<div id="standalone" class="standalone" hidden><iframe id="demo-frame" title="Replika lima tahap laporan IASC dengan chatbot"></iframe><div class="standalone-note">SIMULASI LOKAL · Bukan layanan resmi OJK. Jika halaman kosong atau gagal dimuat, jalankan <code>./start.sh</code> di folder proyek, lalu buka <a id="demo-link" href="http://127.0.0.1:8787/Guest/LaporanV2?assistant=1">Buka demo ↗</a></div></div>
+:root{font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;font-size:13px;color:#243834;background:#f5f7f5;--ink:#193d35;--green:#185847;--line:#dce5df;--muted:#6d7b73}*{box-sizing:border-box}body{margin:0}button,input{font:inherit}button{cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}[hidden]{display:none!important}button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid #9b6b24;outline-offset:3px}.standalone{position:fixed;inset:0;display:flex;flex-direction:column}.standalone iframe{flex:1;width:100%;min-height:0;border:0}.standalone-note{padding:9px 16px;background:#fff7df;color:#645832;font-size:11px}.standalone-note a{color:#6b1717}#assistant{height:100dvh;display:flex;flex-direction:column;overflow:hidden}.simulation{background:#fff7df;border-bottom:1px solid #eee2bc;color:#756333;text-align:center;font-size:9px;letter-spacing:.02em;padding:6px 8px}.chat-heading{display:flex;align-items:center;gap:10px;padding:14px 16px;background:#fff;border-bottom:1px solid var(--line)}.avatar{flex-shrink:0;width:36px;height:36px;border-radius:12px;background:var(--green);color:#fff;display:grid;place-items:center;font-size:19px}.heading-text{flex:1;min-width:0}.heading-text h1{font-size:13px;font-weight:700;margin:0 0 3px}.heading-text p{font-size:10px;color:var(--muted);margin:0;display:flex;align-items:center;gap:5px}.online-dot{width:5px;height:5px;border-radius:50%;background:#67a787}.restart{border:1px solid var(--line);border-radius:7px;background:white;color:var(--muted);padding:6px 8px;font-size:10px}.phase-line{display:flex;justify-content:space-between;gap:12px;align-items:center;background:#f9fbf8;padding:8px 16px;border-bottom:1px solid var(--line);font-size:10px;color:#53675a}.phase-line strong{color:var(--green);font-weight:600}.phase-dots{display:flex;gap:3px}.phase-dot{width:15px;height:3px;border-radius:3px;background:#dce5dd}.phase-dot.active{background:#47836c}.chat-stream{flex:1;overflow-y:auto;overscroll-behavior:contain;padding:18px 14px 10px;scrollbar-width:thin;scrollbar-color:#c2d0c5 transparent}.day-divider{text-align:center;font-size:9px;color:#879187;margin:0 0 18px}.message{max-width:91%;margin:0 0 13px;overflow-wrap:anywhere}.message.assistant{margin-right:auto}.message.user{margin-left:auto}.sender{display:flex;align-items:center;gap:5px;font-size:9px;color:#738279;margin:0 0 5px 2px}.sender-dot{width:4px;height:4px;border-radius:50%;background:#6d987e}.bubble{padding:11px 13px;border:1px solid #e3e9e3;line-height:1.65;border-radius:3px 13px 13px 13px;background:white;white-space:pre-wrap;font-size:12px}.user .bubble{background:#e5f0e7;border-color:#d9e7dc;border-radius:13px 3px 13px 13px;color:#254637}.bubble strong{font-weight:650}.message-image{display:block;width:100%;max-height:200px;object-fit:contain;border-radius:8px;background:#f2f3ed}.image-caption{display:block;font-size:10px;margin-top:7px;color:#62716a;white-space:normal;overflow-wrap:anywhere}.file-symbol{font-size:30px;display:block;line-height:1.2}.fill-notice{margin:2px 0 12px;max-width:94%;display:flex;align-items:flex-start;gap:6px;background:#edf6ee;border:1px solid #d9e9db;border-radius:7px;color:#3e7151;padding:8px 10px;font-size:10px;line-height:1.5}.fill-notice.warning{background:#fff6e5;border-color:#eadbb9;color:#826531}.typing{display:flex;align-items:center;gap:8px;color:#75847a;font-size:10px;padding:6px 4px 14px}.typing-dots{display:flex;gap:3px}.typing-dots i{width:4px;height:4px;border-radius:50%;background:#739181;animation:pulse 1s infinite}.typing-dots i:nth-child(2){animation-delay:.15s}.typing-dots i:nth-child(3){animation-delay:.3s}@keyframes pulse{50%{opacity:.3;transform:translateY(-2px)}}.composer-area{background:#fff;border-top:1px solid var(--line);padding:10px 12px 8px}.quick-replies{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 9px}.quick-replies:empty{display:none}.quick-replies button{font-size:10px;border:1px solid #d2dfd4;background:#fcfefa;color:#3c6954;border-radius:20px;padding:7px 10px;line-height:1.4;max-width:100%;text-align:left}.quick-replies button.demo-chip{border-style:dashed;color:#879181;background:#fafbf9}.composer{display:flex;align-items:center;gap:7px;border:1px solid #dbe4dc;border-radius:24px;background:#f6f8f5;padding:5px}.attach-button,.send-button{width:34px;height:34px;border:0;border-radius:50%;display:grid;place-items:center;flex-shrink:0}.attach-button{background:transparent;color:#55715e;font-size:19px}.send-button{background:var(--green);color:#fff;font-size:17px;padding:0 0 1px 2px}.composer input[type=text]{flex:1;width:0;min-width:0;border:0;outline:0;background:transparent;color:#243c30;padding:8px 0;font-size:12px}.composer input::placeholder{color:#9aa59a}.composer-note{text-align:center;font-size:8px;line-height:1.5;color:#9aa49b;margin:7px 0 0}.summary-card{padding:0;background:#fff;border:1px solid #d3e1d6;border-radius:10px;overflow:hidden;white-space:normal}.summary-card h2{font-size:11px;background:#edf4ee;color:#315d42;margin:0;padding:10px 12px}.summary-card dl{display:grid;grid-template-columns:37% 63%;margin:0;padding:10px 12px;gap:7px;font-size:10px}.summary-card dt{color:#78867b}.summary-card dd{margin:0;color:#2d4434;overflow-wrap:anywhere;font-weight:600}.summary-card p{margin:0;padding:0 12px 11px;font-size:9px;color:#7b867c}.ticket{font:700 18px ui-monospace,monospace;letter-spacing:.04em;color:var(--green);margin:8px 0}.fallback-link{color:var(--green);font-size:11px}.error-message .bubble{background:#fff7f1;color:#825438;border-color:#ead7c8}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;scroll-behavior:auto!important}}@media(max-width:350px){.chat-heading{padding:11px}.chat-stream{padding:13px 10px}.message{max-width:96%}.quick-replies button{font-size:9px}.restart{padding:5px}}
+</style>
+</head>
+<body>
+<div id="standalone" class="standalone" hidden><iframe id="demo-frame" title="Replika laporan IASC dengan Help Center"></iframe><div class="standalone-note">SIMULASI LOKAL · Bukan layanan resmi OJK. Jalankan <code>bash start.sh</code> jika halaman belum tersedia. <a id="demo-link" href="http://127.0.0.1:8787/Guest/LaporanV2?assistant=1">Buka demo lokal ↗</a></div></div>
 <div id="assistant" hidden>
-<div class="demo-banner">SIMULASI LOKAL · Bukan layanan resmi OJK · Gunakan data dummy</div>
-<header class="heading"><div class="mark" aria-hidden="true">✳</div><div><h1>Asisten Pelaporan</h1><p>Unggah bukti. Lengkapi yang kurang. Tinjau bersama.</p></div></header>
-<div class="status-row"><span class="dot" aria-hidden="true"></span><span id="status">Menyiapkan sesi…</span><button type="button" id="restart">Sesi baru</button></div>
-<div id="state-dots" class="state-dots" aria-label="Kemajuan lima tahap asisten"></div><div id="busy" class="busy-indicator" role="status" hidden>Memproses…</div>
-<main><div id="error" class="error" role="alert" hidden></div>
-<section id="upload-section"><div class="bubble"><p><strong>Mari susun laporan Anda.</strong></p><p>Unggah empat jenis bukti dalam tiga kelompok. Data yang terbaca akan dipakai kembali untuk melengkapi lima tahap formulir.</p><p class="muted" id="mode-note">Mode simulasi memakai contoh fiktif; hasilnya bukan pembacaan OCR nyata.</p></div>
-<div class="section-title">1. Identitas & rekening korban</div><div class="upload-grid"><label class="upload-tile"><span>▣ Kartu identitas (KTP)</span><input type="file" id="file-ktp" name="ktp" accept="image/jpeg,image/png,image/webp"><small>JPG, PNG, WebP · maks. 10 MiB awal</small><span class="selected" id="selected-ktp"></span></label><label class="upload-tile"><span>▤ Bukti rekening korban</span><input type="file" id="file-bukti_rekening_korban" name="bukti_rekening_korban" accept="image/jpeg,image/png,image/webp"><small>Nama & nomor rekening korban</small><span class="selected" id="selected-bukti_rekening_korban"></span></label></div>
-<div class="section-title">2. Bukti transfer &nbsp; 3. Bukti komunikasi</div><div class="upload-grid"><label class="upload-tile"><span>↗ Bukti transfer</span><input type="file" id="file-bukti_transfer" name="bukti_transfer" accept="image/jpeg,image/png,image/webp"><small>Rekening, nominal & waktu transaksi</small><span class="selected" id="selected-bukti_transfer"></span></label><label class="upload-tile"><span>☏ Bukti chat / media</span><input type="file" id="file-bukti_chat" name="bukti_chat" accept="image/jpeg,image/png,image/webp"><small>Dipakai untuk 3 kolom bukti</small><span class="selected" id="selected-bukti_chat"></span></label></div>
-<div class="row"><button id="upload" type="button" class="primary">Baca & susun bukti</button><button id="demo" type="button" class="secondary">Pakai bukti dummy</button></div><div class="row" id="sample-links"><a href="/fixtures/v1/ktp.png" download>Contoh KTP</a><a href="/fixtures/v1/bukti_rekening_korban.png" download>Rekening</a><a href="/fixtures/v1/bukti_transfer.png" download>Transfer</a><a href="/fixtures/v1/bukti_chat.png" download>Chat</a></div><p class="note">Gambar diperkecil menjadi kurang dari 900 KB. Unggahan dibatasi pada sesi ini. Jangan gunakan data pribadi nyata untuk demo. Pelaporan mewakili korban dilanjutkan melalui formulir manual karena memerlukan dokumen kuasa dan identitas korban terpisah.</p></section>
-<div id="proofs"></div><div id="chat-log" class="chat-log" aria-label="Riwayat jawaban"></div>
-<section id="delta-section" hidden><div class="bubble"><span id="slot-count" class="slot-count"></span><p id="question" aria-live="polite"></p><p id="slot-reason" class="muted"></p></div><form id="chat-form"><label class="field-label" for="answer" id="answer-label">Jawaban Anda</label><textarea id="answer" placeholder="Ketik jawaban atau tempel transkripsi voice note…" maxlength="4000" required></textarea><div id="quick" class="quick"></div><button class="primary" type="submit" id="send">Simpan jawaban</button></form><p class="note">Hanya data wajib yang kosong atau hasil ekstraksi yang perlu diperiksa akan ditanyakan.</p></section>
-<section id="confirmation-section" hidden><div class="summary-head"><strong>Periksa ringkasan laporan</strong><p>Pastikan nama, rekening dan nominal sesuai bukti. Anda dapat mengoreksi setiap isian sebelum melanjutkan.</p></div><div id="summary" class="summary-body"></div><div id="edit-box" class="editor" hidden><form id="edit-form"><label id="edit-label" class="field-label" for="edit-value"></label><textarea id="edit-value" maxlength="4000" required></textarea><div class="row"><button class="primary" type="submit">Simpan koreksi</button><button id="cancel-edit" class="secondary" type="button">Batal</button></div></form></div><div class="row"><button id="confirm" class="primary" type="button">Data sudah sesuai</button></div></section>
-<section id="ekyc-section" hidden><div class="bubble"><strong>Verifikasi identitas · simulasi</strong><p>Demo mencocokkan nama KTP dengan nama pemilik rekening korban dan memakai skor liveness contoh.</p></div><div class="kyc-card"><div class="kyc-icon" aria-hidden="true">◎</div><strong>Tidak memakai kamera atau biometrik nyata</strong><p class="muted">Passive liveness dan validasi identitas asli memerlukan layanan e-KYC terverifikasi.</p><button id="verify" class="primary" type="button">Jalankan simulasi e-KYC</button><p id="ekyc-result" class="muted"></p></div></section>
-<section id="dispatch-section" hidden><div class="bubble"><strong>Siap mengisi formulir lokal</strong><p>Data lengkap dapat ditempelkan ke replika lima tahap di halaman utama. Periksa kembali semua tahap sebelum menyimpan hasil simulasi.</p></div><label class="terms"><input type="checkbox" id="consent"><span>Saya telah memeriksa contoh data ini dan menyetujui penggunaan untuk simulasi lokal. Ini bukan persetujuan pelaporan resmi.</span></label><label class="field-label" for="captcha-answer">Captcha sesi lokal</label><div class="captcha"><code id="captcha-question"></code><input type="text" inputmode="numeric" id="captcha-answer" placeholder="Jawaban" maxlength="12" autocomplete="off"></div><p class="note">Ketik jawaban sendiri. Tantangan ini hanya berlaku pada demo lokal.</p><div class="row"><button id="autofill" class="primary" type="button">Auto-Fill Form ASP.NET</button></div><p class="note">Tombol ini memvalidasi data dan mengisi replika lokal. Tidak mengirim laporan ke IASC atau instruksi pemblokiran bank.</p></section>
-<section id="complete-section" hidden><div class="success" role="status"><strong>Draft telah disiapkan.</strong><p id="complete-text"></p><p>Tidak ada laporan resmi yang dikirim dan tidak ada rekening yang diblokir.</p></div><div class="row"><button type="button" id="download" class="secondary">Unduh payload JSON</button><button type="button" id="close" class="primary">Tinjau formulir</button></div></section>
-</main><footer>Hybrid Vision OCR + Chat · State machine deterministik · Asisten membantu mengisi, Anda yang memeriksa.</footer>
+  <div class="simulation">SIMULASI LOKAL · Bukan layanan resmi OJK · Gunakan data dummy</div>
+  <header class="chat-heading"><div class="avatar" aria-hidden="true">✳</div><div class="heading-text"><h1>Help Center IASC</h1><p><span class="online-dot"></span><span id="connection-status">Menyiapkan percakapan…</span></p></div><button class="restart" type="button" id="restart">Sesi baru</button></header>
+  <div class="phase-line"><strong id="phase-label">Tahap 1 · Informasi pelapor</strong><span class="phase-dots" id="phase-dots" aria-label="Kemajuan lima tahap laporan"></span></div>
+  <main class="chat-stream" id="chat-stream" role="log" aria-live="polite" aria-relevant="additions text"><div class="day-divider">Percakapan ini · disimpan sementara</div><div id="messages"></div><div id="typing" class="typing" role="status" hidden><span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span><span id="typing-label">Asisten sedang menyiapkan jawaban…</span></div></main>
+  <div class="composer-area"><div id="quick-replies" class="quick-replies" aria-label="Pilihan jawaban cepat"></div><form class="composer" id="composer"><input id="file-input" type="file" accept="image/jpeg,image/png,image/webp" hidden><button id="attach" class="attach-button" type="button" aria-label="Lampirkan foto atau dokumen" title="Lampirkan satu foto">📎</button><input type="text" id="chat-input" aria-label="Pesan untuk asisten" placeholder="Tulis pesan Anda…" maxlength="8000" autocomplete="off"><button id="send" type="submit" class="send-button" aria-label="Kirim pesan">➤</button></form><p id="composer-note" class="composer-note">Enter untuk kirim · satu dokumen setiap unggahan</p></div>
 </div>
 <script>
 (() => {
 'use strict';
-const $=id=>document.getElementById(id),params=new URLSearchParams(location.search);
-if(params.get('embed')!=='1'){
-  $('standalone').hidden=false;
-  const base=location.protocol==='file:'?'http://127.0.0.1:8787':location.origin;
-  $('demo-frame').src=base+'/Guest/LaporanV2?assistant=1';$('demo-link').href=$('demo-frame').src;return;
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+if (params.get('embed') !== '1') {
+  $('standalone').hidden = false;
+  const origin = location.protocol === 'file:' ? 'http://127.0.0.1:8787' : location.origin;
+  $('demo-frame').src = origin + '/Guest/LaporanV2?assistant=1';
+  $('demo-link').href = $('demo-frame').src;
+  return;
 }
-$('assistant').hidden=false;
-const KINDS=['ktp','bukti_transfer','bukti_chat','bukti_rekening_korban'];
-const STAGES=['STATE_1_EVIDENCE_UPLOAD','STATE_2_DELTA_SLOT_FILLING','STATE_3_CONFIRMATION_CARD','STATE_4_EKYC_VERIFICATION','STATE_5_DISPATCH_FREEZE'];
-const LABELS=['Unggah bukti','Lengkapi data','Tinjau ringkasan','Verifikasi identitas','Isi formulir lokal'];
-const FIELDS={apakah_mengalami_sendiri:'Hubungan pelapor',jenis_kelamin:'Jenis kelamin',nama_pelapor:'Nama pelapor',tempat_lahir_pelapor:'Tempat lahir',tanggal_lahir_pelapor:'Tanggal lahir',agama_pelapor:'Agama',pekerjaan_pelapor:'Pekerjaan',kewarganegaraan_pelapor:'Kewarganegaraan',kode_negara_telepon_pelapor:'Kode telepon',nomor_telepon_pelapor:'Nomor telepon',konfirmasi_nomor_telepon_pelapor:'Konfirmasi telepon',email_pelapor:'Email',konfirmasi_email_pelapor:'Konfirmasi email',jenis_identitas:'Jenis identitas',nomor_identitas:'NIK / nomor identitas',provinsi_domisili_pelapor:'Provinsi domisili',kota_domisili_pelapor:'Kota domisili',alamat_pelapor:'Alamat',nomor_terlapor:'Nomor terlapor',nama_terlapor:'Nama terlapor',kode_nomor_terlapor:'Kode telepon terlapor',sumber_media_informasi_penipuan:'Sumber / media penipuan',detail_sumber_media_informasi_penipuan:'Tautan / akun sumber',tanggal_dan_waktu_kejadian:'Waktu kejadian',kronologi_kejadian_penipuan:'Kronologi',nama_penyelenggara_layanan_korban:'Bank korban',nomor_rekening_akun_korban:'Rekening korban',nama_pemilik_rekening_akun_korban:'Pemilik rekening korban',nama_penyelenggara:'Bank terlapor',nomor_rekening_akun:'Rekening terlapor',nama_pemilik_rekening_akun:'Pemilik rekening terlapor',waktu_transaksi:'Waktu transaksi',nominal_transaksi:'Nominal transaksi'};
-const PHASE_NAMES=['Informasi Pihak Pelapor','Informasi Pihak Terlapor','Informasi Kejadian','Informasi Transaksi','Kesediaan Melapor'];
-let session=null,busy=false,lastResult=null,editPath=null;
-const selectedFiles=new Map();
-function error(message){$('error').textContent=message||'';$('error').hidden=!message;}
-function loading(value,label='Memproses…'){
-  busy=value;$('busy').hidden=!value;$('busy').textContent=label;
-  for(const button of document.querySelectorAll('#assistant button'))button.disabled=value;
+$('assistant').hidden = false;
+const bridgeEnabled = params.get('bridge') === '1' && window.parent !== window;
+const PHASES = ['Informasi pelapor','Pihak terlapor','Informasi kejadian','Informasi transaksi','Kesediaan melapor'];
+const UPLOAD_LABELS = {ktp:'Foto KTP',bukti_chat:'Bukti komunikasi',bukti_rekening_korban:'Bukti rekening korban',bukti_transfer:'Bukti transfer',laporan_kepolisian:'Laporan kepolisian'};
+let session = null, busy = false, lastAssistantKey = '', lastSummaryKey = '', completeTicket = null;
+const previews = new Set();
+const acknowledgements = new Map();
+function element(tag, text, className) {
+  const node = document.createElement(tag);
+  if (text !== undefined) node.textContent = String(text);
+  if (className) node.className = className;
+  return node;
 }
-function formatError(detail){if(Array.isArray(detail))return detail.map(item=>item.msg||String(item)).join('\n');return typeof detail==='string'?detail:JSON.stringify(detail||'Permintaan gagal.');}
-async function request(path,body,method='POST'){
-  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),90000);
-  try{
-    const response=await fetch(path,{method,credentials:'same-origin',headers:body instanceof FormData?{}:{'Content-Type':'application/json'},body:body===undefined?undefined:body instanceof FormData?body:JSON.stringify(body),signal:controller.signal});
-    const value=await response.json().catch(()=>({detail:'Server tidak mengembalikan JSON.'}));
-    if(!response.ok)throw new Error(formatError(value.detail||value.error||value));return value;
-  }catch(e){if(e.name==='AbortError')throw new Error('Waktu pemrosesan habis. Coba kembali; gunakan formulir manual bila layanan belum tersedia.');throw e;}
-  finally{clearTimeout(timeout);}
+function richText(node, value) {
+  for (const [index, part] of String(value).split('**').entries()) node.append(index % 2 ? element('strong',part) : document.createTextNode(part));
 }
-async function act(callback,label){if(busy)return;loading(true,label);error('');try{await callback();}catch(e){error(e.message||'Tidak dapat memproses. Coba kembali.');}finally{loading(false);}}
-const endpoint=suffix=>'/api/v1/session/'+encodeURIComponent(session.session_id)+'/'+suffix;
-function currentSlot(){const next=session?.next_slot;return typeof next==='string'?(session.missing_slots||[]).find(x=>x.path===next)||{path:next}:next||(session?.missing_slots||[])[0];}
-function valueAt(path){return path.split('.').reduce((value,key)=>value?.[key],session?.data);}
-function dummyValue(slot){
-  const key=(slot.path||'').split('.').at(-1),examples={nomor_telepon_pelapor:'80000000000',email_pelapor:'pelapor.dummy@example.com',nomor_rekening_akun:'0000000001',nomor_rekening_akun_korban:'0000000000',nama_pelapor:'PELAPOR DUMMY',nama_pemilik_rekening_akun_korban:'PELAPOR DUMMY',nomor_terlapor:'80000000001',nomor_identitas:'0000000000000000',nama_terlapor:'TERLAPOR DUMMY',kronologi_kejadian_penipuan:'DATA DUMMY. Pelapor menerima penawaran barang contoh melalui percakapan fiktif, kemudian melakukan transfer contoh. Barang tidak diterima dan pihak pengirim pesan tidak dapat dihubungi. Tidak ada transaksi atau tuduhan nyata.',sumber_media_informasi_penipuan:'WhatsApp'};
-  return valueAt(slot.path)??examples[key]??'';
+function scrollChat() { $('chat-stream').scrollTop = $('chat-stream').scrollHeight; }
+function bubble(role, text, error = false) {
+  const row = element('article', undefined, 'message ' + role + (error ? ' error-message' : ''));
+  if (role === 'assistant') { const sender = element('div',undefined,'sender'); sender.append(element('span',undefined,'sender-dot'),document.createTextNode('Asisten Help Center IASC')); row.append(sender); }
+  const body = element('div',undefined,'bubble'); richText(body,text); row.append(body); $('messages').append(row); scrollChat(); return body;
 }
-function node(tag,text,className){const el=document.createElement(tag);if(text!==undefined)el.textContent=String(text);if(className)el.className=className;return el;}
-function log(text){$('chat-log').append(node('div',text,'chat-item'));}
-function scalarSummary(parent,path,key,value){
-  if(value===null||value===undefined)return;
-  if(typeof value==='object'){
-    if(value.filename||value.file_name){const line=node('p',(FIELDS[key]||key.replaceAll('_',' '))+': '+(value.filename||value.file_name)+' · '+Math.ceil(Number(value.size_bytes||0)/1024)+' KB','muted');parent.append(line);return;}
-    for(const [childKey,child]of Object.entries(value))scalarSummary(parent,path+'.'+childKey,childKey,child);return;
+function imageBubble(file) {
+  const body = bubble('user','');
+  if (file.type.startsWith('image/')) { const image = element('img',undefined,'message-image'); const url = URL.createObjectURL(file); previews.add(url); image.src = url; image.alt = 'Foto yang dikirim: ' + file.name; body.append(image); image.addEventListener('load',scrollChat,{once:true}); }
+  else body.append(element('span','▤','file-symbol'));
+  body.append(element('span',file.name,'image-caption')); scrollChat();
+}
+function notice(text, warning = false) { const item = element('div',text,'fill-notice' + (warning ? ' warning' : '')); $('messages').append(item); scrollChat(); }
+function loading(value, label = 'Asisten sedang menyiapkan jawaban…') {
+  busy = value; $('typing').hidden = !value; $('typing-label').textContent = label;
+  $('send').disabled = value || !session || Boolean(completeTicket);
+  $('attach').disabled = value || !session?.expected_upload_type || Boolean(completeTicket);
+  $('chat-input').disabled = value || !session || Boolean(completeTicket);
+  $('restart').disabled = value;
+  for (const button of $('quick-replies').querySelectorAll('button')) button.disabled = value;
+  scrollChat();
+}
+function safeError(value) {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(item => item.msg || 'Periksa isian Anda.').join(' ');
+  return 'Permintaan belum dapat diproses. Coba kembali.';
+}
+async function request(path, body, method = 'POST') {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(),90000);
+  try {
+    const response = await fetch(path,{method,credentials:'same-origin',headers:body instanceof FormData || body === undefined ? {} : {'Content-Type':'application/json'},body:body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),signal:controller.signal});
+    const data = response.status === 204 ? null : await response.json().catch(() => null);
+    if (!response.ok) throw new Error(safeError(data?.detail));
+    return data;
+  } catch (error) {
+    if (error.name === 'AbortError') throw new Error('Proses melewati batas waktu. Periksa status sebelum mengirim ulang agar bukti tidak terduplikasi.');
+    throw error;
+  } finally { clearTimeout(timeout); }
+}
+function endpoint(suffix = '') { return '/api/v1/session/' + encodeURIComponent(session.session_id) + (suffix ? '/' + suffix : ''); }
+window.addEventListener('message', event => {
+  if (!bridgeEnabled || event.source !== window.parent || event.origin !== location.origin || event.data?.type !== 'iasc-intake:progress-applied') return;
+  const key = event.data.session_id + ':' + event.data.revision;
+  const pending = acknowledgements.get(key);
+  if (pending) { clearTimeout(pending.timeout); acknowledgements.delete(key); pending.resolve(event.data); }
+});
+async function applyToHost(snapshot) {
+  const patches = Array.isArray(snapshot.dom_patches) ? snapshot.dom_patches : [];
+  if (!bridgeEnabled) {
+    if (patches.length) notice('✓ Data telah dicatat pada draft sesi. Buka demo formulir untuk melihat pengisian live.');
+    return;
   }
-  if(['extraction_confidence','setuju_syarat_dan_ketentuan','captcha_answer','captcha_question'].includes(key))return;
-  const row=node('div',undefined,'edit-row'),span=node('span',(FIELDS[key]||key.replaceAll('_',' '))+': '+value);row.append(span);
-  if(path.startsWith('tahap')&&!path.startsWith('tahap5')&&!key.startsWith('konfirmasi_')){const button=node('button','Ubah');button.type='button';button.dataset.edit=path;row.append(button);}
-  parent.append(row);
-}
-function summary(){
-  const root=$('summary');root.replaceChildren();const one=session.data?.tahap1||{},four=session.data?.tahap4||{},recipients=four.daftar_penyelenggara_terlapor||[];
-  const total=recipients.flatMap(x=>x.daftar_rincian_transaksi||[]).reduce((sum,x)=>sum+Number(x.nominal_transaksi||0),0);
-  const dl=node('dl');for(const [label,value]of [['Pelapor',one.nama_pelapor||'—'],['Rekening korban',(four.nama_penyelenggara_layanan_korban||'')+' · '+(four.nomor_rekening_akun_korban||'—')],['Tujuan transfer',recipients.map(x=>(x.nama_penyelenggara||'')+' · '+(x.nomor_rekening_akun||'')).join('; ')||'—'],['Total transaksi',new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',minimumFractionDigits:Number.isInteger(total)?0:2,maximumFractionDigits:2}).format(total)]]){dl.append(node('dt',label),node('dd',value));}root.append(dl);
-  const details=node('details');details.append(node('summary','Lihat & koreksi seluruh isian lima tahap'));
-  for(let i=1;i<=5;i++){details.append(node('h3',i+'. '+PHASE_NAMES[i-1]));scalarSummary(details,'tahap'+i,'',session.data?.['tahap'+i]||{});}root.append(details);
-}
-function render(){
-  if(!session)return;
-  const index=Math.max(0,STAGES.indexOf(session.state));$('status').textContent=(session.simulation?'Mode simulasi · ':'Gateway AI · ')+LABELS[index];
-  $('state-dots').replaceChildren(...STAGES.map((state,i)=>{const dot=node('span',undefined,'state-dot'+(i<=index?' done':''));dot.setAttribute('aria-label',LABELS[i]+(i===index?' · aktif':''));return dot;}));
-  $('mode-note').textContent=session.simulation?'Mode simulasi memakai contoh fiktif; hasilnya bukan pembacaan OCR nyata.':'Bukti diproses oleh gateway AI yang dikonfigurasi pada server. Periksa semua hasil ekstraksi.';
-  $('demo').hidden=!session.simulation;
-  for(const id of ['upload-section','delta-section','confirmation-section','ekyc-section','dispatch-section','complete-section'])$(id).hidden=true;
-  if(lastResult){$('complete-section').hidden=false;return;}
-  $('upload-section').hidden=index!==0;
-  $('delta-section').hidden=index!==1;
-  $('confirmation-section').hidden=index<2||Boolean(session.confirmed);
-  $('ekyc-section').hidden=index!==3;
-  $('dispatch-section').hidden=index!==4;
-  if(index===1){
-    const slot=currentSlot()||{};$('slot-count').textContent=(session.missing_slots||[]).length+' isian perlu diperiksa';$('question').textContent=session.question||slot.question||('Mohon lengkapi '+(slot.label||slot.path||'data berikut')+'.');$('slot-reason').textContent=slot.reason==='low_confidence'?'Data ini kurang jelas pada bukti. Mohon periksa digit atau teks aslinya.':'Data ini belum terisi.';$('answer-label').textContent=slot.label||FIELDS[(slot.path||'').split('.').at(-1)]||'Jawaban Anda';
-    $('quick').replaceChildren();const value=dummyValue(slot);
-    if(session.simulation&&value!==''){const button=node('button','Pakai contoh: '+String(value).slice(0,45)+(String(value).length>45?'…':''));button.type='button';button.addEventListener('click',()=>$('answer').value=String(value));$('quick').append(button);}
+  const key = snapshot.session_id + ':' + snapshot.revision;
+  const acknowledgement = new Promise(resolve => {
+    const timeout = setTimeout(() => { acknowledgements.delete(key); resolve({error:'Formulir belum mengonfirmasi pengisian. Buka halaman formulir dan periksa isian.',applied_fields:0}); },20000);
+    acknowledgements.set(key,{resolve,timeout});
+  });
+  window.parent.postMessage({type:'iasc-intake:progress',session_id:snapshot.session_id,revision:snapshot.revision,active_wizard_step:snapshot.active_wizard_step,dom_patches:patches,data:snapshot.data,evidence:snapshot.evidence,simulation:snapshot.simulation,result:snapshot.result || null},location.origin);
+  const ack = await acknowledgement;
+  if (ack.error) { notice(ack.error,true); return; }
+  const applied = Number(ack.applied_fields || 0), skipped = Number(ack.skipped_fields || 0);
+  if (applied > 0) {
+    const steps = [...new Set(patches.map(item => item.step || Number(String(item.path || '')[5])).filter(n => n >= 1 && n <= 5))];
+    const detail = steps.length === 1 ? ' Tahap ' + steps[0] : '';
+    notice('✅ ' + applied + ' field' + detail + ' berhasil diisi otomatis ke formulir.');
   }
-  if(index>=2)summary();
-  if(index===4){$('captcha-question').textContent=session.captcha_question||session.data?.tahap5?.captcha_question||'';const ekyc=session.ekyc||{};$('ekyc-result').textContent=ekyc.verified?'Simulasi verifikasi berhasil.':'';}
-  $('proofs').replaceChildren();
-  for(const proof of session.evidence||[]){$('proofs').append(node('div','✓ '+(proof.kind||'Bukti')+' · '+(proof.filename||proof.file_name||'')+' · '+Math.ceil(Number(proof.size_bytes||0)/1024)+' KB','proof'));}
+  if (skipped > 0) notice(skipped + ' isian manual dipertahankan. Periksa perbedaannya pada formulir.',true);
 }
-async function init(){if(session?.session_id){const old=await fetch('/api/v1/session/'+encodeURIComponent(session.session_id),{method:'DELETE',credentials:'same-origin'});if(!old.ok&&old.status!==404)throw new Error('Sesi sebelumnya belum dapat dihapus. Coba kembali.');}session=await request('/api/v1/session/init',{});lastResult=null;selectedFiles.clear();$('chat-log').replaceChildren();$('edit-box').hidden=true;$('consent').checked=false;$('captcha-answer').value='';$('answer').value='';for(const kind of KINDS){$('file-'+kind).value='';$('selected-'+kind).textContent='';}render();}
-async function upload(){
-  const form=new FormData();for(const kind of KINDS){const file=selectedFiles.get(kind)||$('file-'+kind).files[0];if(file)form.append(kind,file);}
-  if(![...form.keys()].length)throw new Error('Pilih bukti terlebih dahulu atau gunakan bukti dummy.');
-  session=await request(endpoint('upload'),form);render();
+function numberCurrency(value) { return new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:2}).format(Number(value)); }
+function summaryCard(snapshot) {
+  if (snapshot.active_wizard_step !== 5 || snapshot.result) return;
+  const key = snapshot.revision + ':' + (snapshot.current_state || snapshot.state);
+  if (key === lastSummaryKey) return;
+  lastSummaryKey = key;
+  const data = snapshot.data || {}, one = data.tahap1 || {}, four = data.tahap4 || {};
+  const recipients = four.daftar_penyelenggara_terlapor || [];
+  const total = recipients.flatMap(item => item.daftar_rincian_transaksi || []).reduce((sum,item) => sum + Number(item.nominal_transaksi || 0),0);
+  const body = bubble('assistant',''); body.classList.add('summary-card');
+  body.append(element('h2','Ringkasan laporan simulasi'));
+  const dl = element('dl');
+  for (const [label,value] of [['Pelapor',one.nama_pelapor || '—'],['Rekening korban',(four.nama_penyelenggara_layanan_korban || '') + ' · ' + (four.nomor_rekening_akun_korban || '—')],['Tujuan transfer',recipients.map(item => (item.nama_penyelenggara || '') + ' · ' + (item.nomor_rekening_akun || '')).join('; ') || '—'],['Total',numberCurrency(total)]]) dl.append(element('dt',label),element('dd',value));
+  body.append(dl,element('p','Periksa data pada formulir di belakang sebelum menyelesaikan simulasi.')); scrollChat();
 }
-for(const kind of KINDS)$('file-'+kind).addEventListener('change',()=>{selectedFiles.delete(kind);$('selected-'+kind).textContent=$('file-'+kind).files[0]?.name||'';});
-$('upload').addEventListener('click',()=>act(upload,'Membaca bukti dan mengisi data…'));
-$('demo').addEventListener('click',()=>act(async()=>{
-  for(const kind of KINDS){const response=await fetch('/fixtures/v1/'+kind+'.png');if(!response.ok)throw new Error('Contoh bukti dummy belum tersedia pada server.');const blob=await response.blob();selectedFiles.set(kind,new File([blob],'dummy-'+kind+'.png',{type:blob.type}));$('selected-'+kind).textContent='dummy-'+kind+'.png';}await upload();
-},'Memuat empat bukti dummy…'));
-$('restart').addEventListener('click',()=>act(init,'Membuat sesi lokal baru…'));
-$('chat-form').addEventListener('submit',event=>{event.preventDefault();const text=$('answer').value.trim();if(!text)return;act(async()=>{const slot=currentSlot(),values=slot?.path?{[slot.path]:text}:undefined;session=await request(endpoint('chat'),{text,values});log(text);$('answer').value='';render();},'Memvalidasi jawaban…');});
-$('summary').addEventListener('click',event=>{const button=event.target.closest('[data-edit]');if(!button)return;editPath=button.dataset.edit;$('edit-label').textContent=FIELDS[editPath.split('.').at(-1)]||editPath;$('edit-value').value=String(valueAt(editPath)??'');$('edit-box').hidden=false;$('edit-value').focus();});
-$('cancel-edit').addEventListener('click',()=>$('edit-box').hidden=true);
-$('edit-form').addEventListener('submit',event=>{event.preventDefault();if(!editPath)return;const value=$('edit-value').value.trim();act(async()=>{session=await request(endpoint('chat'),{text:'Koreksi data oleh pelapor',values:{[editPath]:value}});$('edit-box').hidden=true;render();},'Menyimpan koreksi…');});
-$('confirm').addEventListener('click',()=>act(async()=>{session=await request(endpoint('chat'),{text:'Data sudah saya periksa',confirm:true});render();},'Mengonfirmasi ringkasan…'));
-$('verify').addEventListener('click',()=>act(async()=>{session=await request(endpoint('verify-ekyc'),{simulate:true,liveness_score:0.98});render();},'Mencocokkan nama · simulasi liveness…'));
-$('autofill').addEventListener('click',()=>act(async()=>{
-  if(!$('consent').checked)throw new Error('Centang persetujuan simulasi setelah memeriksa data.');
-  const answer=$('captcha-answer').value.trim();if(!answer)throw new Error('Ketik jawaban captcha lokal.');
-  const result=await request(endpoint('submit'),{setuju_syarat_dan_ketentuan:true,captcha_answer:answer,integration_mode:'dom'});
-  if(result.submitted===true)throw new Error('Respons tidak sesuai mode lokal. Auto-fill dihentikan.');
-  if(!result.data||typeof result.data!=='object')throw new Error('Payload formulir belum tersedia.');
-  lastResult=result;
-  if(params.get('bridge')==='1'&&window.parent!==window){window.parent.postMessage({type:'iasc-intake:apply-v1',data:result.data,evidence:session.evidence,session_id:session.session_id},location.origin);$('complete-text').textContent='Isian kosong telah dikirim ke formulir lokal. Isian manual tetap dipertahankan; periksa lampiran dan setiap tahap.';}
-  else $('complete-text').textContent='Payload JSON tervalidasi tersedia untuk diunduh. Buka replika lokal untuk mencoba auto-fill.';
-  render();
-},'Memvalidasi payload lima tahap…'));
-$('download').addEventListener('click',()=>{if(!lastResult)return;const url=URL.createObjectURL(new Blob([JSON.stringify(lastResult,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download='iasc-draft-simulasi.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
-$('close').addEventListener('click',()=>window.parent.postMessage({type:'iasc-intake:close'},location.origin));
-document.addEventListener('keydown',event=>{if(event.key==='Escape')window.parent.postMessage({type:'iasc-intake:close'},location.origin);});
-act(init,'Menyiapkan sesi pelaporan lokal…');
+function quickReplies(snapshot) {
+  $('quick-replies').replaceChildren();
+  for (const item of snapshot.quick_replies || []) {
+    const reply = typeof item === 'string' ? {label:item,value:item} : item;
+    const button = element('button',reply.label || reply.value); button.type = 'button';
+    button.addEventListener('click',() => sendText(reply.label || reply.value,reply.action || (reply.value !== reply.label ? reply.value : undefined))); $('quick-replies').append(button);
+  }
+  const kind = snapshot.expected_upload_type;
+  if (snapshot.simulation && kind && kind !== 'laporan_kepolisian') {
+    const button = element('button','Coba ' + (UPLOAD_LABELS[kind] || 'foto') + ' dummy','demo-chip'); button.type = 'button';
+    button.addEventListener('click',() => run(async () => {
+      const response = await fetch('/fixtures/v1/' + kind + '.png');
+      if (!response.ok) throw new Error('Contoh foto belum tersedia. Anda tetap dapat melampirkan foto dummy sendiri.');
+      const blob = await response.blob();
+      await uploadFile(new File([blob],'dummy-' + kind + '.png',{type:blob.type}),true);
+    },'Sedang memindai dokumen (OCR) · simulasi…'));
+    $('quick-replies').append(button);
+  }
+  const turn = snapshot.current_state || snapshot.state;
+  const examples = {CONTACT_INPUT:'80000000000, pelapor.dummy@example.com',CHRONOLOGY_INPUT:'Pada 19 Oktober 2026 pukul 10.00 WIB, saya mendapat tawaran barang melalui WhatsApp. Setelah transfer Rp100.000, barang tidak dikirim dan penjual tidak menjawab. Ini cerita dummy untuk simulasi.'};
+  if (snapshot.simulation && examples[turn]) { const button = element('button',turn === 'CONTACT_INPUT' ? 'Coba kontak dummy' : 'Coba cerita dummy','demo-chip'); button.type = 'button'; button.addEventListener('click',() => sendText(examples[turn])); $('quick-replies').append(button); }
+}
+async function receive(snapshot) {
+  if (!snapshot?.session_id || !snapshot.data) throw new Error('Respons sesi tidak lengkap. Muat ulang halaman untuk memulai sesi baru.');
+  session = snapshot;
+  const step = Math.max(1,Math.min(5,Number(snapshot.active_wizard_step || 1)));
+  $('phase-label').textContent = 'Tahap ' + step + ' · ' + PHASES[step-1];
+  $('phase-dots').replaceChildren(...PHASES.map((_,index) => { const dot = element('span',undefined,'phase-dot' + (index < step ? ' active' : '')); dot.setAttribute('aria-label','Tahap ' + (index+1)); return dot; }));
+  $('connection-status').textContent = snapshot.simulation ? 'Asisten simulasi · siap membantu' : 'Asisten AI · siap membantu';
+  $('chat-input').placeholder = snapshot.expected_upload_type ? 'Tulis pesan atau lampirkan foto…' : step === 5 ? 'Ketik jawaban atau konfirmasi Anda…' : 'Tulis jawaban Anda…';
+  $('file-input').accept = 'image/jpeg,image/png,image/webp';
+  $('attach').title = snapshot.expected_upload_type ? 'Lampirkan ' + UPLOAD_LABELS[snapshot.expected_upload_type] : 'Ikuti pertanyaan asisten terlebih dahulu';
+  await applyToHost(snapshot);
+  summaryCard(snapshot);
+  const message = snapshot.assistant_message || snapshot.reply || snapshot.question || 'Saya siap membantu Anda melengkapi laporan.';
+  const key = snapshot.revision + ':' + (snapshot.current_state || snapshot.state) + ':' + message;
+  if (key !== lastAssistantKey) { bubble('assistant',message); lastAssistantKey = key; }
+  if (snapshot.manual_url) { const link = element('a','Lanjutkan pada formulir manual ↗','fallback-link'); link.href = '/Guest/LaporanV2'; link.target = '_top'; $('messages').append(link); }
+  const result = snapshot.result;
+  if (result?.simulated === true && result.submitted === false && /^SIM-[A-Za-z0-9-]+$/.test(result.ticket_number || '')) {
+    if (completeTicket !== result.ticket_number) { completeTicket = result.ticket_number; const body = bubble('assistant','Simulasi laporan sudah selesai. Nomor tiket:'); body.append(element('div',result.ticket_number,'ticket'),element('span','Tiket ini hanya untuk demo lokal, tanpa tindakan bank.','image-caption')); }
+  }
+  quickReplies(snapshot); scrollChat();
+}
+async function run(callback, label) {
+  if (busy) return;
+  loading(true,label);
+  try { await callback(); }
+  catch (error) {
+    bubble('assistant',error.message || 'Ada kendala. Silakan coba kembali.',true);
+    if (session && !$('recover-status')) {
+      const recover = element('button','Periksa status terakhir'); recover.type = 'button'; recover.id = 'recover-status';
+      recover.addEventListener('click',() => run(async () => receive(await request(endpoint(),undefined,'GET')),'Menyelaraskan status laporan…'));
+      $('quick-replies').append(recover);
+    }
+  }
+  finally { loading(false); }
+}
+async function sendText(text, action) {
+  const value = String(text || '').trim(); if (!value || busy || !session) return;
+  await run(async () => { bubble('user',value); $('chat-input').value = ''; await receive(await request(endpoint('chat'),{text:value,...(action ? {action} : {})})); },'Asisten sedang menyiapkan jawaban…');
+}
+async function uploadFile(file, alreadyBusy = false) {
+  if (!file || !session?.expected_upload_type) throw new Error('Saat ini asisten sedang meminta jawaban teks. Ikuti pertanyaan di chat terlebih dahulu.');
+  if (file.size > 10*1024*1024 || file.size <= 0) throw new Error('Pilih satu file yang tidak kosong, maksimal 10 MiB.');
+  const work = async () => { imageBubble(file); const form = new FormData(); form.append('file',file); await receive(await request(endpoint('upload'),form)); };
+  if (alreadyBusy) await work(); else await run(work,'Sedang memindai dokumen (OCR)' + (session.simulation ? ' · simulasi…' : '…'));
+}
+async function init() {
+  if (session?.session_id) { const response = await fetch(endpoint(),{method:'DELETE',credentials:'same-origin'}); if (!response.ok && response.status !== 404) throw new Error('Sesi sebelumnya belum dapat dihapus. Coba kembali.'); }
+  for (const url of previews) URL.revokeObjectURL(url); previews.clear();
+  for (const pending of acknowledgements.values()) { clearTimeout(pending.timeout); pending.resolve({applied_fields:0}); } acknowledgements.clear();
+  session = null; lastAssistantKey = ''; lastSummaryKey = ''; completeTicket = null; $('messages').replaceChildren(); $('quick-replies').replaceChildren(); $('chat-input').value = '';
+  await receive(await request('/api/v1/session/init',{}));
+}
+$('composer').addEventListener('submit',event => { event.preventDefault(); sendText($('chat-input').value); });
+$('attach').addEventListener('click',() => { if (!busy && session?.expected_upload_type) $('file-input').click(); });
+$('file-input').addEventListener('change',async () => { const file = $('file-input').files[0]; $('file-input').value = ''; if (file) { try { await uploadFile(file); } catch (error) { bubble('assistant',error.message,true); } } });
+$('restart').addEventListener('click',() => run(init,'Menyiapkan percakapan baru…'));
+document.addEventListener('keydown',event => { if (event.key === 'Escape' && window.parent !== window) window.parent.postMessage({type:'iasc-intake:close'},location.origin); });
+window.addEventListener('pagehide',() => { for (const url of previews) URL.revokeObjectURL(url); });
+run(init,'Menyiapkan percakapan…');
 })();
-</script></body></html>
+</script>
+</body></html>

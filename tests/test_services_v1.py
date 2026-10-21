@@ -84,6 +84,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             "AI_MODE": "auto", "AI_API_KEY": "", "AI_BASE_URL": "http://localhost:8000/v1",
             "VISION_MODEL_NAME": "vision-test", "CHAT_MODEL_NAME": "chat-test",
             "AI_RESPONSE_FORMAT": "json_schema", "AI_TIMEOUT_SECONDS": "10",
+            "VISION_INPUT_MODE": "image",
         })
         self.env.start()
         self.addCleanup(self.env.stop)
@@ -125,18 +126,66 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.confidence["tahap1.nama_pelapor"], 0.9)
 
     async def test_remote_chat_requests_only_delta_and_supports_json_object(self):
-        slot = "tahap1.email_pelapor"
+        slot = "tahap1.nama_pelapor"
+        requests = []
 
         def handler(request):
             body = json.loads(request.content)
+            requests.append(body)
             self.assertEqual(body["model"], "chat-test")
             self.assertEqual(body["response_format"], {"type": "json_object"})
             self.assertNotIn("secret", body["messages"][1]["content"])
-            return completion([{"field": slot, "value": "pelapor.dummy@example.com", "confidence": 1.0}])
+            return completion([{"field": slot, "value": "PELAPOR DUMMY", "confidence": 1.0}])
 
         os.environ.update(AI_MODE="remote", AI_RESPONSE_FORMAT="json_object")
-        result = await LLMGatewayService(transport=httpx.MockTransport(handler)).extract_chat("pelapor.dummy@example.com", [slot], {"api_key": "secret"})
-        self.assertEqual(result.values[slot], "pelapor.dummy@example.com")
+        result = await LLMGatewayService(transport=httpx.MockTransport(handler)).extract_chat("Nama saya PELAPOR DUMMY", [slot], {"api_key": "secret"})
+        self.assertEqual(result.values[slot], "PELAPOR DUMMY")
+        self.assertEqual(len(requests), 1)
+
+    async def test_sumopod_configuration_routes_chat_and_vision_without_exposing_key(self):
+        for name in ("AI_BASE_URL", "VISION_MODEL_NAME", "CHAT_MODEL_NAME", "AI_RESPONSE_FORMAT"):
+            os.environ.pop(name, None)
+        os.environ.update(AI_MODE="auto", AI_API_KEY="sumopod-test-secret")
+        calls = []
+        def handler(request):
+            self.assertEqual(str(request.url), "https://ai.sumopod.com/v1/chat/completions")
+            self.assertEqual(request.headers["Authorization"], "Bearer sumopod-test-secret")
+            body = json.loads(request.content)
+            self.assertEqual(body["model"], "deepseek-v4-flash-vision-exp" if isinstance(body["messages"][1]["content"], list) else "deepseek-v4-flash")
+            self.assertEqual(body["response_format"], {"type": "json_object"})
+            self.assertNotIn("sumopod-test-secret", request.content.decode())
+            calls.append(body["messages"][1]["content"])
+            return completion([{"field": "tahap1.nama_pelapor", "value": "PELAPOR DUMMY", "confidence": 0.98}])
+        gateway = LLMGatewayService(transport=httpx.MockTransport(handler))
+        self.assertFalse(gateway.simulated)
+        await gateway.extract("ktp", image_bytes(), "image/png")
+        await gateway.extract_chat("Nama saya PELAPOR DUMMY", ["tahap1.nama_pelapor"], {})
+        self.assertIsInstance(calls[0], list)
+        self.assertIsInstance(calls[1], str)
+
+    async def test_local_ocr_sends_only_extracted_text_to_configured_chat_model(self):
+        os.environ.update(AI_MODE="remote", VISION_INPUT_MODE="ocr_text")
+        def handler(request):
+            body = json.loads(request.content)
+            self.assertEqual(body["model"], "chat-test")
+            content = body["messages"][1]["content"]
+            self.assertIsInstance(content, str)
+            self.assertIn("NAMA: PELAPOR DUMMY", content)
+            self.assertNotIn("image_url", request.content.decode())
+            return completion([{"field": "tahap1.nama_pelapor", "value": "PELAPOR DUMMY", "confidence": 0.97}])
+        with patch("services.llm_gateway.local_ocr_text", return_value="NAMA: PELAPOR DUMMY") as ocr:
+            result = await LLMGatewayService(transport=httpx.MockTransport(handler)).extract("ktp", image_bytes(), "image/png")
+            ocr.assert_called_once()
+        self.assertFalse(result.simulated)
+        self.assertEqual(result.values["tahap1.nama_pelapor"], "PELAPOR DUMMY")
+
+    async def test_empty_or_failed_local_ocr_never_calls_provider_or_invents_data(self):
+        os.environ.update(AI_MODE="remote", VISION_INPUT_MODE="ocr_text")
+        def forbidden(request):
+            self.fail("OCR failure must stop before the provider")
+        for value, error in [("", None), (None, ImageProcessingError("OCR belum berhasil"))]:
+            with self.subTest(value=value), patch("services.llm_gateway.local_ocr_text", return_value=value, side_effect=error), self.assertRaises(GatewayError):
+                await LLMGatewayService(transport=httpx.MockTransport(forbidden)).extract("ktp", image_bytes(), "image/png")
 
     async def test_provider_cannot_change_action_fields_or_confidence(self):
         os.environ["AI_MODE"] = "remote"
@@ -174,7 +223,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("sensitive", str(caught.exception))
 
     def test_insecure_remote_and_invalid_mode_rejected(self):
-        for values in ({"AI_MODE": "invalid"}, {"AI_MODE": "remote", "AI_BASE_URL": "http://example.com/v1"}, {"AI_MODE": "remote", "AI_BASE_URL": "https://example.com/v1", "AI_API_KEY": ""}):
+        for values in ({"AI_MODE": "invalid"}, {"VISION_INPUT_MODE": "invalid"}, {"AI_MODE": "remote", "AI_BASE_URL": "http://example.com/v1"}, {"AI_MODE": "remote", "AI_BASE_URL": "https://example.com/v1", "AI_API_KEY": ""}):
             with self.subTest(values=values), patch.dict(os.environ, values), self.assertRaises(GatewayError):
                 LLMGatewayService()
 

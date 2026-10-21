@@ -1,14 +1,87 @@
-<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>API lokal — Hybrid Intake</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/integration.css"></head><body><header class="topbar"><a class="brand" href="/">IASC / API Lokal</a><a href="/openapi.json">OpenAPI ↗</a></header><main class="host-main"><div class="eyebrow">SIMULASI LOKAL · BUKAN API RESMI</div><h1>Hybrid <em>intake.</em></h1><p>FastAPI + kontrak Pydantic lima tahap. Sesi berlaku selama 60 menit tidak aktif; satu worker. Token sesi adalah rahasia akses sementara.</p><div class="host-grid"><article class="host-card"><h2>Alur sesi v1</h2><pre>POST /api/v1/session/init
-GET  /api/v1/session/{id}
-POST /api/v1/session/{id}/upload
-POST /api/v1/session/{id}/chat
-POST /api/v1/session/{id}/verify-ekyc
-POST /api/v1/session/{id}/submit
-GET  /api/v1/session/{id}/status
-DELETE /api/v1/session/{id}</pre><p>Upload multipart: <code>ktp</code>, <code>bukti_transfer</code>, <code>bukti_chat</code>, <code>bukti_rekening_korban</code>. JPG/PNG/WebP maksimal 10 MiB awal per file, dikompresi menjadi &lt;900 kB. PDF tersedia pada kontrak data, tetapi ekstraksi PDF memerlukan adapter tambahan.</p><p>Chat: <code>{"text":"email=pelapor.dummy@example.com"}</code> atau <code>{"values":{"tahap1.email_pelapor":"pelapor.dummy@example.com"}}</code>. Konfirmasi: <code>{"confirm":true}</code>.</p></article><article class="host-card"><h2>Konfirmasi & integrasi</h2><pre>POST .../verify-ekyc
-{"simulate":true,"liveness_score":0.98}
+<!doctype html>
+<html lang="id">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>API lokal — Help Center IASC</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/static/style.css"></head>
+<body>
+<header class="topbar"><a class="brand" href="/">IASC / API Lokal</a><a href="/openapi.json">OpenAPI ↗</a></header>
+<main>
+<div class="eyebrow">SIMULASI LOKAL · BUKAN API RESMI</div>
+<h1>Help Center <em>OCR &amp; Chat.</em></h1>
+<p>Satu input teks dan satu lampiran untuk percakapan lima tahap. Server menentukan urutan dokumen, mengirim patch field, dan membuat tiket dummy. Tidak ada pengiriman resmi, biometrik nyata, atau tindakan bank.</p>
+<section class="phases">
+<h2>Alur percakapan</h2>
+<ol>
+<li>Status pelapor → KTP → nomor HP dan email dalam satu jawaban.</li>
+<li>Bukti chat → lengkapi informasi terlapor → tambah bukti atau lanjut.</li>
+<li>Cerita serta waktu kejadian → laporan polisi berupa gambar atau lewati.</li>
+<li>Bukti rekening korban → transfer → tambah transfer atau lanjut.</li>
+<li>Ringkasan → jawaban CAPTCHA lokal menyatakan consent simulasi → tiket SIM-….</li>
+</ol>
+<p>Field kosong/invalid dan confidence di bawah 0,85 menahan alur. Cerita memakai fakta pengguna; waktu yang belum disebut ditanyakan. Bukti tambahan menambah baris/transaksi. e-KYC tiruan bersifat opsional.</p>
+</section>
+<section class="phases">
+<h2>Endpoint sesi v1</h2>
+<pre>POST   /api/v1/session/init
+GET    /api/v1/session/{id}
+POST   /api/v1/session/{id}/upload
+POST   /api/v1/session/{id}/chat
+GET    /api/v1/session/{id}/files/{file_id}
+DELETE /api/v1/session/{id}
+GET    /api/v1/session/{id}/status
+POST   /api/v1/session/{id}/verify-ekyc
+POST   /api/v1/session/{id}/submit</pre>
+<p>Upload menerima satu multipart <code>file</code>. Jenis diinferensikan dari <code>expected_upload_type</code>, bukan dipilih client. JPG/PNG/WebP maksimal 10 MiB dan 12 megapiksel, dibersihkan metadata dan dikompresi menjadi JPEG di bawah 900.000 byte. PDF/audio belum diterima.</p>
+<pre>POST .../chat
+{"text":"Ya, saya sendiri"}
 
-POST .../submit
+POST .../upload
+multipart: file=@ktp-dummy.png
+
+POST .../chat
+{"text":"08123456789, pelapor.dummy@example.com"}
+
+POST .../chat
+{"text":"Lanjut ke Tahap 3","action":"continue"}</pre>
+<p>Quick reply memakai <code>more_chat</code>, <code>more_transfer</code>, <code>skip_police</code>, atau <code>continue</code> sesuai state. Koreksi API dapat memakai <code>{"values":{"tahap1.email_pelapor":"koreksi@example.com"}}</code>; perubahan membatalkan consent/tiket sebelumnya.</p>
+</section>
+<section class="phases">
+<h2>Pengisian progresif</h2>
+<pre>{"state":"CONTACT_INPUT",
+ "active_wizard_step":1,
+ "expected_upload_type":null,
+ "assistant_message":"Ketik nomor HP dan email Anda.",
+ "dom_patches":[{"op":"set","path":"tahap1.nama_pelapor",
+                 "value":"NAMA DUMMY","step":1}],
+ "revision":2}</pre>
+<p>Setiap respons mutasi memuat patch leaf, langkah aktif, data, quick reply, dan revisi. File merupakan objek metadata atomik; tabel memakai path berindeks. GET sesi mengirim ulang seluruh patch untuk pemulihan.</p>
+<p>Bridge replika memeriksa sumber/origin iframe, menerapkan field setiap 120 ms, menyorot/menggulir field, lalu berpindah ke tahap aktif. Radio, dropdown, tanggal, lampiran, dan tabel bersarang dipetakan. Isian manual dipertahankan; konflik diberitahukan. Sesi baru membersihkan isian AI sebelumnya sambil mempertahankan edit manual.</p>
+</section>
+<section class="phases">
+<h2>Tiket dan adapter lokal</h2>
+<p>Pada <code>FINAL_CONFIRMATION</code>, pesan menjelaskan consent S&amp;K simulasi. Pengguna mengetik jawaban CAPTCHA ke <code>/chat</code>; jawaban benar membuat tiket di chat/host. Widget tidak menghitung atau mengirim jawabannya otomatis. Maksimal lima jawaban salah.</p>
+<pre>POST .../submit
 {"setuju_syarat_dan_ketentuan":true,
  "captcha_answer":"jawaban pengguna",
- "integration_mode":"dom"}</pre><p>Mode <code>dom</code> menghasilkan data dan mapping untuk mengisi replika. Mode <code>webhook</code> memanggil adapter mock lokal, mengembalikan nomor <code>SIM-…</code> dan <code>SIMULATED_NO_BANK_ACTION</code>. Keduanya selalu <code>submitted:false</code>.</p><p>Tidak ada e-KYC asli, pemblokiran dana, atau multi-hop tracing. Gateway remote tidak mengganti kegagalan dengan data dummy.</p><p><a href="/api/v1/schema">JSON Schema lengkap ↗</a> · <a href="/widget/iasc-ai-widget.html">Buka demo widget ↗</a></p></article></div></main></body></html>
+ "integration_mode":"dom"}</pre>
+<p>Adapter eksplisit <code>dom</code> mengembalikan mapping replika; <code>webhook</code> memanggil mock lokal. URL webhook eksternal/resmi ditolak. Hasil selalu <code>SIM-…</code>, <code>SIMULATED_NO_BANK_ACTION</code>, <code>submitted:false</code>; tidak ada ring-fencing/tracing.</p>
+</section>
+<section class="phases">
+<h2>Embedding, konfigurasi, dan batas</h2>
+<pre>&lt;script src="http://127.0.0.1:8787/static/widget.js" defer&gt;&lt;/script&gt;</pre>
+<p>API dipanggil iframe ke origin intake yang sama. Atur <code>EMBED_ORIGINS</code> serta CSP host. Bridge <code>data-integrate="replica"</code> hanya aktif pada origin yang sama; integrasi ASP.NET resmi masih membutuhkan kontrak field/master ID, modal, file, dan autentikasi dari pemilik portal.</p>
+<p>Provider utama chat: <strong>Sumopod AI</strong> melalui <a href="https://docs.sumopod.com/guides/ai/openai-compatible-api">API OpenAI-compatible resmi</a>. Key hanya disimpan pada server. Pilih model yang tersedia pada dashboard atau <code>/v1/models</code> untuk key Anda; daftar dapat berbeda antar akun.</p>
+<pre>AI_MODE=auto
+AI_BASE_URL=https://ai.sumopod.com/v1
+AI_API_KEY=isi_key_sumopod_di_server
+VISION_INPUT_MODE=ocr_text
+VISION_MODEL_NAME=deepseek-v4-flash-vision-exp
+CHAT_MODEL_NAME=deepseek-v4-flash
+AI_RESPONSE_FORMAT=json_object</pre>
+<p>Key kosong memakai simulasi berlabel. Isi key lalu restart untuk mengaktifkan Sumopod. Chat <code>deepseek-v4-flash</code> berhasil pada uji live akun pengujian; jalur gambar model vision eksperimental belum berhasil. Dengan <code>ocr_text</code>, gambar dibaca Tesseract lokal dan hanya teks OCR dikirim ke model chat; <code>VISION_MODEL_NAME</code> tidak dipakai.</p>
+<p>Instal Tesseract dan trained data <code>eng</code>: macOS <code>brew install tesseract</code>; Debian/Ubuntu <code>sudo apt-get install tesseract-ocr tesseract-ocr-eng</code>. OCR berjalan di thread terpisah. Teks OCR kehilangan konteks visual/tata letak; foto buram membutuhkan koreksi atau konfirmasi. Mode dipilih eksplisit, tanpa fallback provider atau dummy saat OCR/API gagal. Uji request HTTP tiruan melengkapi uji live terbatas.</p>
+<p>Gateway tetap model-agnostic. Alternatif on-premise: <code>AI_MODE=remote</code>, <code>VISION_INPUT_MODE=image</code>, <code>AI_BASE_URL=http://127.0.0.1:4000/v1</code>, serta alias Qwen vision/DeepSeek chat pada satu gateway OpenAI-compatible. Mode <code>image</code> mengirim gambar langsung dan memerlukan model yang benar-benar mendukung input gambar. HTTP tanpa TLS/keyless hanya untuk localhost; on-premise belum diuji.</p>
+<p>Satu worker, sesi/file di memori, maksimal 20 sesi, masa tidak aktif satu jam, dan 12 unggahan per sesi. Restart menghapus sesi. Token memberi akses data/file; perlakukan sebagai rahasia. Katalog lokasi/bank masih demo, verifikasi perwakilan/surat kuasa belum tersedia. PoC belum untuk data pribadi nyata atau akses publik.</p>
+<p><a href="/api/v1/schema">JSON Schema ↗</a> · <a href="/Guest/LaporanV2?assistant=1">Buka demo percakapan ↗</a> · <a href="/widget/iasc-ai-widget.html">Wrapper widget ↗</a></p>
+</section>
+</main>
+</body>
+</html>
