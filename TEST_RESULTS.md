@@ -6,7 +6,7 @@ Entry point `main:app`, Python 3.14.4 pada macOS. Seluruh data pengujian fiktif.
 
 | Suite | Hasil |
 | --- | --- |
-| Python: `.venv/bin/python -m pytest -q` | **70 lulus, 65 subtest lulus** |
+| Python: `.venv/bin/python -m pytest -q` | **79 lulus, 85 subtest lulus** |
 | JavaScript: `node --test tests/*.test.mjs` | **24 lulus, 0 gagal** |
 
 Python meliputi:
@@ -50,6 +50,14 @@ Satu warning deprecation Starlette/httpx muncul pada pytest; tidak ada tes gagal
 - Konfigurasi eksplisit `VISION_INPUT_MODE=ocr_text` memakai Tesseract lokal lalu `deepseek-v4-flash`. KTP dummy menghasilkan 13 field dan nama yang sesuai fixture; bukti transfer menghasilkan 6 field. Respons nyata ini bukan data simulasi terprogram.
 - Browser dimuat ulang dengan koneksi Sumopod aktif: label Asisten AI tampil, KTP diunggah melalui lampiran tunggal, biodata otomatis terisi, dan chat meminta kontak setelah host mengonfirmasi pengisian.
 - Satu percobaan KTP melewati timeout 35 detik; pengulangan berhasil dalam 19,6 detik. Contoh konfigurasi memakai timeout 60 detik. Target seluruh intake di bawah 45 detik belum terbukti.
+
+## Regresi validasi OCR KTP
+
+- Nilai `PEREMPUAN`, `ISLAM`, `ktp`, `WNI`, serta tanggal `18-02-1986`, `18/02/1986`, ISO dan bulan Indonesia dengan kapitalisasi/angka hari berbeda kini dinormalkan sebelum validasi kontrak.
+- Ekstraksi dokumen mempertahankan field valid dan lampirannya ketika field lain tidak valid. Alur upload → pertanyaan NIK yang belum terbaca → koreksi lewat chat diperiksa melalui ASGI dengan respons provider tiruan.
+- NIK numerik, notasi desimal/ilmiah, karakter huruf yang menyerupai angka, dan panjang selain 16 digit tidak dipaksakan menjadi NIK valid. Confidence rendah tetap meminta konfirmasi. Path terlarang, duplikat dan envelope rusak tetap ditolak; validasi chat/manual tetap ketat.
+- JPEG contoh yang diberikan pengguna diproses melalui kompresi dan OCR Tesseract nyata secara lokal. Alur unggahan lulus dengan respons AI tiruan yang memakai variasi format yang ditemukan pada gambar; foto/hasil OCR tidak dikirim ke provider dan tidak dimasukkan ke repository.
+- Sembilan tes regresi baru mencakup normalisasi serta alur tersebut. Panggilan Sumopod nyata untuk foto pengguna dan pengujian ulang browser tidak dilakukan pada perbaikan ini.
 
 ## Yang belum diuji
 

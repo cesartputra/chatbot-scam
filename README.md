@@ -102,6 +102,8 @@ AI_TIMEOUT_SECONDS=60
 
 Key kosong mempertahankan simulasi berlabel; isi key dan restart untuk memakai Sumopod. Uji live pada akun pengujian berhasil memanggil model chat `deepseek-v4-flash`. Jalur gambar langsung model `deepseek-v4-flash-vision-exp` masih eksperimental dan belum berhasil pada akun tersebut; nama ini tidak dipakai saat `ocr_text` aktif. Hasil pengujian OCR+Sumopod dicatat terpisah dalam `TEST_RESULTS.md`.
 
+Hasil OCR KTP dinormalkan sebelum validasi: kapitalisasi jenis kelamin/agama/identitas, `WNI`, dan format tanggal yang jelas. Kolom yang masih invalid dibiarkan kosong untuk ditanyakan lewat chat; kolom valid serta lampiran tetap disimpan. Digit NIK tidak ditebak, ditambah, atau dikonversi dari angka.
+
 `ocr_text` adalah mode eksplisit, bukan perpindahan provider saat gagal. OCR berjalan di thread terpisah dengan trained data Inggris (`eng`). Hasilnya kehilangan konteks tata letak/visual dan dapat salah membaca foto buram; field kosong atau confidence rendah tetap perlu koreksi/konfirmasi manusia. Kegagalan OCR atau Sumopod menghasilkan error tanpa memasukkan data dummy. Transport HTTP tiruan juga menguji endpoint, model, Authorization, dan format request.
 
 Contoh on-premise dengan alias model pada satu gateway:
@@ -202,6 +204,6 @@ Integrasi ASP.NET resmi masih memerlukan kontrak field/master ID, tabel modal, t
 node --test tests/*.test.mjs
 ```
 
-**70 tes Python, 65 subtest, dan 24 tes Node lulus** pada pemeriksaan 21 Oktober 2026. Cakupan meliputi urutan percakapan, kontak alami, kronologi aktual, bukti tambahan, confidence, koreksi atomik, kepemilikan file, CAPTCHA, integrasi mock, mapping progresif, revisi, dan isian manual. Hasil serta batas pemeriksaan dicatat dalam `TEST_RESULTS.md`. Uji live Sumopod terbatas pada akun/model yang dicatat di `TEST_RESULTS.md`; on-premise dan backend ASP.NET resmi belum diuji.
+**79 tes Python, 85 subtest, dan 24 tes Node lulus** pada pemeriksaan 21 Oktober 2026. Cakupan meliputi urutan percakapan, kontak alami, kronologi aktual, bukti tambahan, confidence, koreksi atomik, kepemilikan file, CAPTCHA, integrasi mock, mapping progresif, revisi, dan isian manual. Hasil serta batas pemeriksaan dicatat dalam `TEST_RESULTS.md`. Uji live Sumopod terbatas pada akun/model yang dicatat di `TEST_RESULTS.md`; on-premise dan backend ASP.NET resmi belum diuji.
 
 Referensi: [FastAPI multipart uploads](https://fastapi.tiangolo.com/tutorial/request-files/), [Pydantic validators](https://docs.pydantic.dev/latest/concepts/validators/), [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs). Sumber/hak aset tercatat dalam `static/replica/assets/NOTICE.md`.

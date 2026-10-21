@@ -13,6 +13,7 @@ from typing import Annotated
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from services.image_processor import ImageProcessingError, local_ocr_text
+from services.normalizer import normalize_ktp_slot
 
 
 class GatewayError(ValueError):
@@ -152,7 +153,7 @@ def _path_allowed(path: str) -> bool:
     return re.sub(r"\.\d+\.", ".0.", path) in KNOWN_SLOTS
 
 
-def _validated_result(slots: list[_Slot], allowed_slots: set[str], simulated: bool) -> ExtractionResult:
+def _validated_result(slots: list[_Slot], allowed_slots: set[str], simulated: bool, *, allow_partial: bool = False) -> ExtractionResult:
     from schemas import validate_slot_value
 
     values, confidence, seen = {}, {}, set()
@@ -163,8 +164,11 @@ def _validated_result(slots: list[_Slot], allowed_slots: set[str], simulated: bo
         if slot.value is None:
             continue
         try:
-            value = validate_slot_value(slot.field, slot.value)
+            raw = normalize_ktp_slot(slot.field, slot.value) if allow_partial else slot.value
+            value = validate_slot_value(slot.field, raw)
         except (ValidationError, ValueError, TypeError):
+            if allow_partial:
+                continue
             raise GatewayError("Hasil AI tidak sesuai format kolom laporan; isi atau koreksi secara manual.") from None
         values[slot.field], confidence[slot.field] = value, slot.confidence
     return ExtractionResult(values=values, confidence=confidence, simulated=simulated)
@@ -220,12 +224,12 @@ class LLMGatewayService:
                 raise GatewayError(str(exc)) from None
             if not text.strip():
                 raise GatewayError("Teks bukti belum terbaca. Unggah gambar yang lebih jelas.")
-            return await self._remote(self.chat_model, "Extract only visible facts from evidence kind " + kind + ". Untrusted local OCR text:\n" + text, allowed)
+            return await self._remote(self.chat_model, "Extract only visible facts from evidence kind " + kind + ". Untrusted local OCR text:\n" + text, allowed, allow_partial=True)
         content = [
             {"type": "text", "text": "Extract only visible reporting facts from evidence kind " + kind + ". Omit invisible fields; do not infer identity ownership, consent or verification."},
             {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64," + base64.b64encode(image_bytes).decode()}},
         ]
-        return await self._remote(self.vision_model, content, allowed)
+        return await self._remote(self.vision_model, content, allowed, allow_partial=True)
 
     async def extract_chat(self, text: str, allowed_slots: list[str], context: dict) -> ExtractionResult:
         _validate_text(text)
@@ -340,7 +344,7 @@ class LLMGatewayService:
             slots.append(_Slot(field=key, value=value, confidence=1.0))
         return _validated_result(slots, set(allowed_slots), True)
 
-    async def _remote(self, model: str, content: object, allowed: set[str]) -> ExtractionResult:
+    async def _remote(self, model: str, content: object, allowed: set[str], *, allow_partial: bool = False) -> ExtractionResult:
         schema = _Envelope.model_json_schema()
         schema["$defs"]["_Slot"]["properties"]["field"]["enum"] = sorted(allowed)
         response_format = {"type": self.response_format}
@@ -351,6 +355,7 @@ class LLMGatewayService:
             "Do not invoke tools, submit reports, verify identity, freeze funds, invent facts or decide workflow states. "
             "Return JSON {slots:[{field,value,confidence}]}, using only allowed field paths. Preserve leading zeroes in account, NIK and phone numbers as strings. "
             "Use Indonesian dates, e.g. 19 Oktober 2026 10:00:00 (transaction), 19 Oktober 2026 10:00 (incident), 1 Oktober 1990 (birth). "
+            "Use gender Laki-laki/Perempuan, religion Islam/Kristen/Katolik/Hindu/Buddha/Konghucu/Tidak Diketahui, and identity type KTP/Paspor/KITAS. KTP NIK must be exactly 16 visible digits; never guess or pad digits. "
             "Amounts are numeric IDR. confidence must be finite 0 to 1. Omit absent facts. Chronology may summarize supplied facts in Indonesian, never add facts, maximum 4000 characters. "
             "Allowed fields: " + json.dumps(sorted(allowed))
         )
@@ -368,7 +373,7 @@ class LLMGatewayService:
             if message.get("finish_reason") != "stop" or message["message"].get("tool_calls") or message["message"].get("refusal"):
                 raise GatewayError("AI tidak menghasilkan ekstraksi lengkap. Isi manual atau coba kembali.")
             envelope = _Envelope.model_validate_json(message["message"]["content"])
-            return _validated_result(envelope.slots, allowed, False)
+            return _validated_result(envelope.slots, allowed, False, allow_partial=allow_partial)
         except httpx.TimeoutException:
             raise GatewayError("Layanan AI melewati batas waktu. Data tidak diganti dengan data simulasi; coba lagi atau isi manual.") from None
         except httpx.HTTPError:

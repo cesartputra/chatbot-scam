@@ -1,10 +1,13 @@
 """Conservative normalization against the same dropdown values as the local replica."""
 
 import ast
+from datetime import date
 from difflib import SequenceMatcher
 from pathlib import Path
 import re
 import unicodedata
+
+from schemas import MONTHS, to_indonesian_date
 
 
 def _master_constant(name):
@@ -76,3 +79,38 @@ def normalize_location(city: str, province: str | None = None) -> tuple[str | No
 
 def normalize_media(text: str) -> str | None:
     return _match(text, MEDIA, {"WA": "WhatsApp", "WHATS APP": "WhatsApp", "IG": "Instagram", "WEB": "Website", "SITUS WEB": "Website", "TIK TOK": "TikTok", "E MAIL": "Email", "PANGGILAN TELEPON": "Telepon"})
+
+
+def normalize_ktp_slot(path: str, value):
+    """Normalize document spelling/format only; never guess identity digits."""
+    if not isinstance(value, str):
+        return value
+    value = value.strip()
+    choices = {
+        "tahap1.jenis_kelamin": ("Laki-laki", "Perempuan"),
+        "tahap1.agama_pelapor": ("Islam", "Kristen", "Protestan", "Katolik", "Hindu", "Buddha", "Konghucu", "Tidak Diketahui"),
+        "tahap1.jenis_identitas": ("KTP", "Paspor", "KITAS"),
+    }
+    if path in choices:
+        return next((choice for choice in choices[path] if _key(choice) == _key(value)), value)
+    if path == "tahap1.kewarganegaraan_pelapor" and _key(value) in {"WNI", "INDONESIA"}:
+        return "Indonesia"
+    if path == "tahap1.nomor_identitas":
+        if not re.fullmatch(r"[0-9]+(?:[\s-]+[0-9]+)*", value):
+            raise ValueError("NIK KTP belum terbaca lengkap")
+        digits = re.sub(r"[\s-]", "", value)
+        if len(digits) != 16:
+            raise ValueError("NIK KTP harus tepat 16 digit")
+        return digits
+    if path == "tahap1.tanggal_lahir_pelapor":
+        numeric = re.fullmatch(r"([0-9]{1,2})([-/])([0-9]{1,2})\2([0-9]{4})", value)
+        if numeric:
+            value = date(int(numeric[4]), int(numeric[3]), int(numeric[1]))
+        else:
+            literal = re.fullmatch(r"([0-9]{1,2})\s+([A-Za-z]+)\s+([0-9]{4})", value)
+            if literal:
+                month = next((month for month in MONTHS if month.casefold() == literal[2].casefold()), None)
+                if month:
+                    value = f"{int(literal[1])} {month} {literal[3]}"
+        return to_indonesian_date(value)
+    return value
