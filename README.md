@@ -6,7 +6,7 @@ UI mengikuti acuan halaman publik dan screenshot IASC yang diperiksa pada 20 Okt
 
 ## Jalankan
 
-Memerlukan Python 3.11+; diuji pada Python 3.14.4. Node diperlukan untuk tes JavaScript. **Tesseract dengan trained data `eng` diperlukan untuk konfigurasi Sumopod remote `VISION_INPUT_MODE=ocr_text`** dan OCR asisten lama; mode simulasi tanpa key tidak memerlukannya.
+Memerlukan Python 3.11+; diuji pada Python 3.14.4. Node diperlukan untuk tes JavaScript. **Tesseract open source dengan trained data `eng` wajib dipasang pada server untuk OCR KTP**, terlepas dari model vision yang dipilih. Mode simulasi tanpa key memakai data dummy tetap.
 
 ```bash
 # macOS
@@ -61,6 +61,8 @@ iasc-ai-intake/
 ├── services/
 │   ├── orchestrator.py            # State, sesi, delta patch, confidence
 │   ├── llm_gateway.py             # Gateway OpenAI-compatible dan simulasi
+│   ├── ktp_ocr.py                 # OCR dan parser KTP sepenuhnya lokal
+│   ├── privacy.py                 # Pseudonim data pribadi sebelum API teks
 │   ├── image_processor.py         # Validasi/kompresi dan pointer bukti
 │   └── normalizer.py              # Bank, lokasi, media
 ├── widget/iasc-ai-widget.html      # Chat, kartu ringkasan, wrapper demo
@@ -87,24 +89,34 @@ Default `AI_MODE=auto` dengan key kosong memakai **ekstraksi dokumen dummy tetap
 
 Provider utama chat adalah **Sumopod AI** melalui base URL `https://ai.sumopod.com/v1` dan API key pada server, mengikuti [dokumentasi OpenAI-compatible resmi](https://docs.sumopod.com/guides/ai/openai-compatible-api). Pilih nama model dari dashboard atau `/v1/models` untuk key Anda; akses model dapat berbeda antar akun.
 
-Konfigurasi utama memakai OCR Tesseract lokal, lalu mengirim **teks hasil OCR** ke model chat Sumopod:
+Konfigurasi utama memisahkan KTP lokal, chat Sumopod, dan vision Sumopod untuk bukti lain:
+
+Untuk instalasi yang sudah memiliki `.env`, `git pull` tidak mengganti file tersebut. Sesuaikan ID model dan `VISION_INPUT_MODE` seperti contoh berikut, pertahankan key Anda, lalu restart `bash start.sh`.
 
 ```dotenv
 AI_MODE=auto
 AI_BASE_URL=https://ai.sumopod.com/v1
 AI_API_KEY=isi_key_sumopod_di_server
-VISION_INPUT_MODE=ocr_text
-VISION_MODEL_NAME=deepseek-v4-flash-vision-exp
+VISION_INPUT_MODE=image
+VISION_MODEL_NAME=gemini/gemini-3.5-flash-lite
 CHAT_MODEL_NAME=deepseek-v4-flash
 AI_RESPONSE_FORMAT=json_object
 AI_TIMEOUT_SECONDS=60
 ```
 
-Key kosong mempertahankan simulasi berlabel; isi key dan restart untuk memakai Sumopod. Uji live pada akun pengujian berhasil memanggil model chat `deepseek-v4-flash`. Jalur gambar langsung model `deepseek-v4-flash-vision-exp` masih eksperimental dan belum berhasil pada akun tersebut; nama ini tidak dipakai saat `ocr_text` aktif. Hasil pengujian OCR+Sumopod dicatat terpisah dalam `TEST_RESULTS.md`.
+Key kosong mempertahankan simulasi berlabel; isi key dan restart untuk memakai Sumopod. **Satu API key dapat dipakai untuk chat dan vision** bila key tersebut mengizinkan kedua model. ID model harus persis seperti hasil `/v1/models`, termasuk prefix `gemini/`. Nama tanpa prefix ditolak oleh key pengujian; bukan karena key yang sama dipakai dua model.
+
+Vision Gemini pada gateway ini memakai `AI_RESPONSE_FORMAT=json_object`; schema lengkap dan contoh confidence disertakan dalam prompt. `json_schema` ditolak upstream pada uji nyata. Confidence yang tidak dikembalikan provider menjadi **0**, sehingga wajib dikonfirmasi manusia. Error akses model, nama model, kuota, timeout, dan kontrak respons dibedakan tanpa menampilkan isi respons/key.
+
+KTP diproses oleh Tesseract dan parser label di server; **gambar maupun teks OCR KTP tidak dikirim ke Sumopod**. Parser menangani label KTP Indonesia, header wilayah, tempat/tanggal lahir, dan alamat. Hasil yang tidak terbaca tetap kosong. Ini ekstraksi data, bukan pemeriksaan keaslian KTP.
 
 Hasil OCR KTP dinormalkan sebelum validasi: kapitalisasi jenis kelamin/agama/identitas, `WNI`, dan format tanggal yang jelas. Kolom yang masih invalid dibiarkan kosong untuk ditanyakan lewat chat; kolom valid serta lampiran tetap disimpan. Digit NIK tidak ditebak, ditambah, atau dikonversi dari angka.
 
-`ocr_text` adalah mode eksplisit, bukan perpindahan provider saat gagal. OCR berjalan di thread terpisah dengan trained data Inggris (`eng`). Hasilnya kehilangan konteks tata letak/visual dan dapat salah membaca foto buram; field kosong atau confidence rendah tetap perlu koreksi/konfirmasi manusia. Kegagalan OCR atau Sumopod menghasilkan error tanpa memasukkan data dummy. Transport HTTP tiruan juga menguji endpoint, model, Authorization, dan format request.
+Percakapan memakai pseudonim bertipe, misalnya `[NAMA_PELAPOR_1]`, `[NIK_1]`, `[REKENING_1]`, `[EMAIL_1]`, dan `[TELEPON_1]`. Nilai pribadi yang sudah diketahui dari sesi serta pola pengenal pada pesan disamarkan sebelum API; relasi pelapor/terlapor, jumlah transaksi, dan waktu kejadian dipertahankan. Pemetaan hanya ada di memori selama permintaan dan dipulihkan sebelum validasi/isian formulir. Model tidak mendapat tabel pemetaan. Penanda baru/rusak ditolak; kronologi yang kehilangan penanda juga ditolak. Kontak dan koreksi satu kolom pribadi diparsing lokal tanpa API.
+
+Masking berbasis konteks dan pola **bukan jaminan anonimisasi menyeluruh**: nama baru huruf kecil tanpa penanda atau konteks bisa tidak dikenali. Tuliskan identitas baru dengan label seperti `nama terlapor:`. Bukti selain KTP dikirim sebagai gambar ke vision; masking teks **tidak menyamarkan piksel gambar**. Gunakan bukti dummy atau gambar yang data sensitifnya sudah disamarkan. Laporan polisi hanya disimpan lokal, tanpa ekstraksi cloud.
+
+`ocr_text` tetap tersedia sebagai pilihan eksplisit untuk bukti non-KTP: Tesseract membaca gambar lalu teksnya dimasking sebelum model chat. KTP selalu memakai parser lokal. OCR berjalan pada thread terpisah; hasil buram/ambigu memerlukan koreksi manusia. Kegagalan OCR atau Sumopod tidak memasukkan data dummy dan tidak mengganti draft yang sudah ada.
 
 Contoh on-premise dengan alias model pada satu gateway:
 
@@ -120,7 +132,7 @@ AI_RESPONSE_FORMAT=json_object
 
 Gateway tetap model-agnostic: kedua model memakai **satu `AI_BASE_URL`**; untuk on-premise, router vLLM/LiteLLM harus menyediakan alias dan kemampuan masing-masing. HTTP tanpa TLS hanya diterima pada localhost. Keyless localhost memerlukan `AI_MODE=remote` eksplisit. Konfigurasi on-premise belum diuji.
 
-Mode remote `image` mengirim gambar yang telah dibersihkan metadata ke model vision; `ocr_text` mengirim teks OCR lokal ke model chat. Jawaban/kronologi dikirim ke model chat bila diperlukan. Kontak eksplisit diparsing lokal. Key tetap di server. Kegagalan provider **tidak beralih ke dummy** dan tidak mengganti draft yang ada. Restart setelah mengganti konfigurasi. Model hanya mengekstrak slot; state, consent, validasi, dan tiket dikendalikan server.
+Restart setelah mengganti konfigurasi. Model hanya mengekstrak slot; state, consent, validasi, dan tiket dikendalikan server. Key tetap di server dan `.env` tidak masuk Git.
 
 ## API v1: percakapan bertahap
 
@@ -204,6 +216,6 @@ Integrasi ASP.NET resmi masih memerlukan kontrak field/master ID, tabel modal, t
 node --test tests/*.test.mjs
 ```
 
-**79 tes Python, 85 subtest, dan 24 tes Node lulus** pada pemeriksaan 21 Oktober 2026. Cakupan meliputi urutan percakapan, kontak alami, kronologi aktual, bukti tambahan, confidence, koreksi atomik, kepemilikan file, CAPTCHA, integrasi mock, mapping progresif, revisi, dan isian manual. Hasil serta batas pemeriksaan dicatat dalam `TEST_RESULTS.md`. Uji live Sumopod terbatas pada akun/model yang dicatat di `TEST_RESULTS.md`; on-premise dan backend ASP.NET resmi belum diuji.
+**114 tes Python, 124 subtest, dan 24 tes Node lulus** pada pemeriksaan 22 Oktober 2026. Cakupan meliputi OCR KTP lokal, masking/pemulihan data pribadi, urutan percakapan, kontak alami, kronologi aktual, bukti tambahan, confidence, koreksi atomik, kepemilikan file, CAPTCHA, integrasi mock, mapping progresif, revisi, dan isian manual. Uji API aplikasi dengan Sumopod nyata berhasil mencapai ringkasan tahap 5 tanpa submit/CAPTCHA. Hasil serta batas pemeriksaan dicatat dalam `TEST_RESULTS.md`; on-premise dan backend ASP.NET resmi belum diuji.
 
 Referensi: [FastAPI multipart uploads](https://fastapi.tiangolo.com/tutorial/request-files/), [Pydantic validators](https://docs.pydantic.dev/latest/concepts/validators/), [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs). Sumber/hak aset tercatat dalam `static/replica/assets/NOTICE.md`.

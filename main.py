@@ -198,7 +198,8 @@ async def upload_evidence(session_id: str, file: UploadFile = File(...)):
         candidate.evidence[kind] = metadata
         if result:
             values, confidence, pointers = remap_evidence(candidate, kind, result.values, result.confidence, metadata)
-            apply_patch(candidate, values, confidence, ("simulation:" if result.simulated else "vision:") + kind)
+            source = "simulation:" if result.simulated else "local_ocr:" if kind == "ktp" else "vision:"
+            apply_patch(candidate, values, confidence, source + kind)
         else:
             pointers = smart_file_reuse(kind, metadata)
         for path, reference in pointers.items():

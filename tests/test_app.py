@@ -112,14 +112,16 @@ class IntakeTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/sessions/'+second).status_code,404)
 
     def test_gateway_failure_does_not_change_the_draft(self):
+        before = self.edit({row[0]: row[5] for row in app.FIELDS if row[2] in (1, 2)}).json()['data']
         with patch.dict(os.environ, {'AI_MODE':'remote'}), patch.object(app, 'gateway_extract', new=AsyncMock(side_effect=HTTPException(502,'Gateway gagal'))):
-            result = self.client.post(self.url+'/messages',json={'text':'Pelapor Dummy'})
+            result = self.client.post(self.url+'/messages',json={'text':'Belanja online'})
         self.assertEqual(result.status_code,502)
-        self.assertIsNone(self.client.get(self.url).json()['data']['pelapor_nama'])
+        self.assertEqual(self.client.get(self.url).json()['data'], before)
 
     def test_gateway_validates_output_and_never_calls_tools(self):
+        self.edit({row[0]: row[5] for row in app.FIELDS if row[2] in (1, 2)})
         with patch.dict(os.environ, {'AI_MODE':'remote','AI_BASE_URL':'http://127.0.0.1:9999/v1','AI_MODEL':'test-model'}):
-            for content,expected_status in [('{"pelapor_nama":"DUMMY"}',200), ('{"pelapor_nik":"bad"}',502), ('{"tool_call":"submit"}',502), ('not json',502)]:
+            for content,expected_status in [('{"kategori_modus":"BELANJA_ONLINE"}',200), ('{"pelapor_nik":"bad"}',502), ('{"tool_call":"submit"}',502), ('not json',502)]:
                 response = httpx_response(content)
                 client = AsyncMock()
                 client.post.return_value = response

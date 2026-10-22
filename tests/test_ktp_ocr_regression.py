@@ -8,8 +8,9 @@ from unittest.mock import patch
 
 import httpx
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
-from services.llm_gateway import GatewayError, LLMGatewayService, SIMULATION_VALUES
+from services.llm_gateway import GatewayError, LLMGatewayService, SIMULATION_VALUES, _Envelope, _validated_result
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,8 +41,28 @@ class KtpOCRGatewayRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(environment.stop)
 
     async def extract(self, slots):
-        gateway = LLMGatewayService(transport=httpx.MockTransport(lambda request: completion(slots)))
-        return await gateway.extract("ktp", FIXTURE.read_bytes(), "image/png")
+        # Validate OCR slots directly: KTP extraction no longer goes to an AI API.
+        try:
+            envelope = _Envelope.model_validate({"slots": slots})
+        except ValidationError:
+            raise GatewayError("Ekstraksi lokal tidak valid.") from None
+        return _validated_result(envelope.slots, set(SIMULATION_VALUES["ktp"]), False, allow_partial=True)
+
+    async def test_ktp_uses_local_ocr_without_any_http_request(self):
+        requests = []
+
+        def handler(request):
+            requests.append(request)
+            raise AssertionError("KTP must never reach an AI provider")
+
+        values = {"tahap1.nama_pelapor": "PELAPOR DUMMY"}
+        gateway = LLMGatewayService(transport=httpx.MockTransport(handler))
+        with patch("services.llm_gateway.extract_ktp_locally", return_value=(values, {key: 0.9 for key in values})) as local_ocr:
+            result = await gateway.extract("ktp", FIXTURE.read_bytes(), "image/png")
+        self.assertEqual(result.values, values)
+        self.assertFalse(result.simulated)
+        local_ocr.assert_called_once()
+        self.assertEqual(requests, [])
 
     async def test_uppercase_ktp_labels_and_numeric_birth_date_are_canonical(self):
         result = await self.extract([
@@ -131,17 +152,18 @@ class KtpOCRWorkflowRegressionTests(unittest.TestCase):
                       "tahap1.agama_pelapor": "ISLAM", "tahap1.tanggal_lahir_pelapor": "18-02-1986",
                       "tahap1.nomor_identitas": "12345"}
             evidence_slots = [{"field": path, "value": value, "confidence": 0.97} for path, value in values.items()]
+            local_result = _validated_result(_Envelope.model_validate({"slots": evidence_slots}).slots, set(SIMULATION_VALUES["ktp"]), False, allow_partial=True)
             requests = []
 
             def handler(request):
                 content = json.loads(request.content)["messages"][1]["content"]
                 requests.append(content)
-                return completion(evidence_slots if isinstance(content, list) else [slot("nomor_identitas", "0000000000000000")])
+                raise AssertionError("KTP extraction and explicit NIK correction must stay local")
 
             gateway = LLMGatewayService(transport=httpx.MockTransport(handler))
             SESSIONS.clear()
             try:
-                with patch.object(main, "gateway", return_value=gateway), TestClient(main.app) as client:
+                with patch("services.llm_gateway.extract_ktp_locally", return_value=(local_result.values, local_result.confidence)) as local_ocr, patch.object(main, "gateway", return_value=gateway), TestClient(main.app) as client:
                     created = client.post("/api/v1/session/init", json={})
                     self.assertEqual(created.status_code, 201)
                     url = "/api/v1/session/" + created.json()["session_id"]
@@ -149,6 +171,8 @@ class KtpOCRWorkflowRegressionTests(unittest.TestCase):
                     uploaded = client.post(url + "/upload", files={"file": ("ktp-dummy.png", FIXTURE.read_bytes(), "image/png")})
                     self.assertEqual(uploaded.status_code, 200, uploaded.text)
                     state = uploaded.json()
+                    self.assertEqual(requests, [])
+                    local_ocr.assert_called_once()
                     self.assertEqual(state["state"], IntakeState.PELAPOR)
                     self.assertEqual(state["next_slot"], "tahap1.nomor_identitas")
                     self.assertEqual(state["data"]["tahap1"]["nama_pelapor"], "PELAPOR DUMMY")
@@ -163,7 +187,7 @@ class KtpOCRWorkflowRegressionTests(unittest.TestCase):
                     self.assertEqual(corrected.status_code, 200, corrected.text)
                     self.assertEqual(corrected.json()["state"], IntakeState.CONTACT)
                     self.assertEqual(corrected.json()["data"]["tahap1"]["nomor_identitas"], "0000000000000000")
-                    self.assertEqual(len(requests), 2)
+                    self.assertEqual(requests, [])
             finally:
                 SESSIONS.clear()
 

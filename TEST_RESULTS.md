@@ -1,12 +1,12 @@
-# Hasil verifikasi PoC — 21 Oktober 2026
+# Hasil verifikasi PoC — 22 Oktober 2026
 
-Entry point `main:app`, Python 3.14.4 pada macOS. Seluruh data pengujian fiktif. Tidak ada pengiriman laporan ke IASC atau tindakan bank.
+Entry point `main:app`, Python 3.14.4 pada macOS. Uji cloud hanya memakai fixture dummy. Contoh KTP pengguna diproses lokal; gambar/nilai identitas tidak disimpan dalam repository. Tidak ada pengiriman laporan ke IASC atau tindakan bank.
 
 ## Pengujian otomatis
 
 | Suite | Hasil |
 | --- | --- |
-| Python: `.venv/bin/python -m pytest -q` | **79 lulus, 85 subtest lulus** |
+| Python: `.venv/bin/python -m pytest -q` | **114 lulus, 124 subtest lulus** |
 | JavaScript: `node --test tests/*.test.mjs` | **24 lulus, 0 gagal** |
 
 Python meliputi:
@@ -25,11 +25,14 @@ Python meliputi:
 - Jawaban CAPTCHA lokal melalui chat membuat tiket `SIM-…` tanpa akses jaringan; persetujuan eksplisit pada adapter, lima percobaan salah, dan hasil idempoten.
 - Adapter DOM/webhook mock, penolakan endpoint eksternal, e-KYC tiruan opsional, serta regresi API/asisten lama.
 - Gateway HTTP tiruan: schema/JSON object, pemilihan model, field terlarang/duplikat, confidence invalid, refusal/timeout/error. Kegagalan tidak beralih ke dummy.
-- Sumopod: URL/Authorization/model/JSON object, OCR lokal mengirim teks ke model chat tanpa gambar, serta OCR kosong/gagal menghentikan permintaan sebelum provider.
+- Sumopod: URL/Authorization/model/JSON object, ID Gemini lengkap, confidence yang hilang menjadi 0 untuk konfirmasi manusia, serta error model/izin/kuota tanpa membocorkan respons provider.
+- KTP: Tesseract dan parser lokal; gambar maupun OCR KTP tidak memanggil HTTP, pada mode `image` maupun `ocr_text`. Field valid tetap tersimpan bila field lain tidak terbaca; bacaan bertentangan memerlukan konfirmasi.
+- Privasi: nama, NIK, rekening, kontak, alamat, biodata dari konteks, referensi, serta rahasia berlabel dimasking dan dipulihkan lokal. Token asing/rusak/tidak pernah dikirim ditolak; kronologi harus mempertahankan penanda. Nomor di samping tanggal tetap disamarkan dan alamat tidak menelan nominal/waktu kejadian.
+- Koreksi satu kolom pribadi pada API v1 dan API chat lama tetap lokal, termasuk jawaban nama huruf kecil tanpa label.
 
 Node meliputi validasi fase/modal, dokumen perwakilan, parsing nominal dan tanggal, mapping payload lama, shared object URL, serta mapping progresif untuk radio/dropdown/tanggal/file dan koleksi bersarang. Cakupan progresif juga meliputi path/revisi tidak sah, sesi lama, Decimal tanpa kehilangan presisi, konflik manual, reset isian AI saat sesi baru, dan gate hasil simulasi untuk consent/CAPTCHA. Tes tidak menghubungi IASC.
 
-## Pemeriksaan browser versi percakapan
+## Pemeriksaan browser versi percakapan sebelumnya (20–21 Oktober)
 
 - Chat memiliki satu lampiran dan satu input teks; quick reply status memulai unggah KTP dummy. Biodata terlihat mengisi radio, tanggal, dropdown dan kolom teks satu per satu; badge melaporkan 12 field yang benar-benar berubah.
 - Satu balasan natural nomor HP dan email mengisi empat kolom kontak/konfirmasi, lalu wizard otomatis pindah ke Tahap 2.
@@ -44,20 +47,21 @@ Satu warning deprecation Starlette/httpx muncul pada pytest; tidak ada tes gagal
 
 ## Pemeriksaan API Sumopod nyata
 
-- Key hanya berada pada `.env` yang diabaikan Git. `/v1/models` merespons HTTP 200; model yang tersedia pada key pengujian adalah `deepseek-flash`, `deepseek-v4-flash`, dan `deepseek-v4-flash-vision-exp`.
-- Chat `deepseek-v4-flash` menghasilkan ekstraksi nama dummy yang lolos validasi. `gpt-4o-mini` tidak tersedia pada key tersebut.
-- Model vision eksperimental merespons HTTP 401 dengan error autentikasi upstream. Dua alias teks menerima request gambar tetapi tidak mengekstrak field; ini tidak dianggap pembacaan gambar yang berhasil.
-- Konfigurasi eksplisit `VISION_INPUT_MODE=ocr_text` memakai Tesseract lokal lalu `deepseek-v4-flash`. KTP dummy menghasilkan 13 field dan nama yang sesuai fixture; bukti transfer menghasilkan 6 field. Respons nyata ini bukan data simulasi terprogram.
-- Browser dimuat ulang dengan koneksi Sumopod aktif: label Asisten AI tampil, KTP diunggah melalui lampiran tunggal, biodata otomatis terisi, dan chat meminta kontak setelah host mengonfirmasi pengisian.
-- Satu percobaan KTP melewati timeout 35 detik; pengulangan berhasil dalam 19,6 detik. Contoh konfigurasi memakai timeout 60 detik. Target seluruh intake di bawah 45 detik belum terbukti.
+- Key hanya berada pada `.env` yang diabaikan Git, mode berkas 600. Katalog key saat diagnosis memuat `gemini/gemini-3.5-flash-lite`, `deepseek-v4-flash`, dan `deepseek-flash`.
+- Nama Gemini tanpa prefix ditolak HTTP 403. Dengan prefix benar, respons awal tidak menyertakan confidence per slot. Schema lengkap dan contoh confidence dalam prompt JSON object memperbaikinya. `json_schema` menghasilkan HTTP 400 dari upstream Gemini pada gateway ini.
+- **Satu key yang sama berhasil untuk chat dan vision.** Tidak diperlukan key terpisah; izin model tetap mengikuti pengaturan akun/key.
+- Gateway aplikasi membaca fixture `bukti_chat` (6/6 field sesuai, 4,4 detik), `bukti_rekening_korban` (3/3, 2,8 detik), dan `bukti_transfer` (6/6, 3,5 detik) melalui vision Gemini. Nomor rekening tetap memiliki nol awal. Pengukuran satu kali, bukan benchmark.
+- Chat `deepseek-v4-flash` memproses narasi dummy yang telah dimasking; nama dan rekening asli dipulihkan di server, kronologi lolos validasi (15,2 detik pada satu percobaan).
+- **Uji API aplikasi melalui ASGI pada 22 Oktober**: status pelapor → OCR KTP lokal → kontak → vision bukti chat → kronologi Sumopod dengan masking → lewati laporan polisi → vision bukti rekening → vision transfer → `FINAL_CONFIRMATION`, wizard tahap 5. `submitted:false`, tanpa request submit atau jawaban CAPTCHA. Tidak memakai respons provider tiruan.
+- Pengujian browser penuh tidak diulang untuk perubahan ini. Target seluruh intake di bawah 45 detik belum diukur.
 
 ## Regresi validasi OCR KTP
 
 - Nilai `PEREMPUAN`, `ISLAM`, `ktp`, `WNI`, serta tanggal `18-02-1986`, `18/02/1986`, ISO dan bulan Indonesia dengan kapitalisasi/angka hari berbeda kini dinormalkan sebelum validasi kontrak.
-- Ekstraksi dokumen mempertahankan field valid dan lampirannya ketika field lain tidak valid. Alur upload → pertanyaan NIK yang belum terbaca → koreksi lewat chat diperiksa melalui ASGI dengan respons provider tiruan.
+- Ekstraksi dokumen mempertahankan field valid dan lampirannya ketika field lain tidak valid. Alur upload → pertanyaan NIK yang belum terbaca → koreksi lokal lewat chat diperiksa melalui ASGI, dengan larangan HTTP untuk KTP dan koreksi tersebut.
 - NIK numerik, notasi desimal/ilmiah, karakter huruf yang menyerupai angka, dan panjang selain 16 digit tidak dipaksakan menjadi NIK valid. Confidence rendah tetap meminta konfirmasi. Path terlarang, duplikat dan envelope rusak tetap ditolak; validasi chat/manual tetap ketat.
-- JPEG contoh yang diberikan pengguna diproses melalui kompresi dan OCR Tesseract nyata secara lokal. Alur unggahan lulus dengan respons AI tiruan yang memakai variasi format yang ditemukan pada gambar; foto/hasil OCR tidak dikirim ke provider dan tidak dimasukkan ke repository.
-- Sembilan tes regresi baru mencakup normalisasi serta alur tersebut. Panggilan Sumopod nyata untuk foto pengguna dan pengujian ulang browser tidak dilakukan pada perbaikan ini.
+- JPEG contoh pengguna dibaca oleh Tesseract dan parser lokal nyata: 11 kolom terdeteksi, termasuk tempat/tanggal lahir, jenis kelamin, agama, dan wilayah. Bacaan yang bertentangan diberi confidence 0,70 untuk konfirmasi. Foto/hasil OCR tidak dikirim ke provider dan tidak dimasukkan ke repository.
+- Confidence OCR lokal merupakan heuristik, bukan probabilitas yang telah dikalibrasi. Parser tidak menebak digit NIK, membaca tanggal penerbitan sebagai tanggal lahir, atau memverifikasi keaslian identitas.
 
 ## Yang belum diuji
 
@@ -65,5 +69,6 @@ Satu warning deprecation Starlette/httpx muncul pada pytest; tidak ada tes gagal
 - Seluruh variasi struk bank, master kota/bank resmi lengkap, ekstraksi PDF, audio/transkripsi, dan verifikasi perwakilan/surat kuasa.
 - Target di bawah 45 detik, akurasi operasional, peluang intersepsi dana, beban produksi, dan ketahanan multi-worker.
 - Kesamaan UI setiap piksel atau semua perangkat/browser. Replika mengikuti acuan tampilan dan belum menjadi kontrak resmi terverifikasi.
+- Masking berbasis pola/konteks tidak menjamin deteksi semua nama/alamat baru tanpa label. Masking teks tidak mengubah piksel bukti non-KTP yang dikirim ke vision; gunakan gambar dummy atau yang telah disamarkan.
 
 Runtime tetap lokal, satu worker, dengan sesi/file di memori. Tiket `SIM-…`, hasil e-KYC, consent, dan CAPTCHA di sini merupakan simulasi; tidak membuktikan pelaporan resmi, verifikasi identitas, pemblokiran dana, ring-fencing, ataupun multi-hop tracing.

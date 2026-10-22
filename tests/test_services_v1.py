@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import re
 import unittest
 from unittest.mock import patch
 
@@ -110,23 +111,43 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_remote_structured_extraction_and_environment_models(self):
         requests = []
+        slot = "tahap4.daftar_penyelenggara_terlapor.0.nama_penyelenggara"
 
         def handler(request):
             body = json.loads(request.content)
             requests.append(body)
             self.assertEqual(request.url.path, "/v1/chat/completions")
             self.assertEqual(body["response_format"]["type"], "json_schema")
-            return completion([{"field": "tahap1.nama_pelapor", "value": "PELAPOR DUMMY", "confidence": 0.9}])
+            return completion([{"field": slot, "value": "BCA", "confidence": 0.9}])
 
         os.environ["AI_MODE"] = "remote"
         gateway = LLMGatewayService(transport=httpx.MockTransport(handler))
-        result = await gateway.extract("ktp", image_bytes(), "image/png")
+        result = await gateway.extract("bukti_transfer", image_bytes(), "image/png")
         self.assertFalse(result.simulated)
         self.assertEqual(requests[0]["model"], "vision-test")
-        self.assertEqual(result.confidence["tahap1.nama_pelapor"], 0.9)
+        self.assertEqual(result.values[slot], "BCA")
+        self.assertEqual(result.confidence[slot], 0.9)
+
+    async def test_ktp_uses_local_server_ocr_and_never_calls_provider(self):
+        slot = "tahap1.nama_pelapor"
+        os.environ["AI_MODE"] = "remote"
+
+        def forbidden(request):
+            self.fail("KTP must never reach the cloud provider")
+
+        for input_mode in ("image", "ocr_text"):
+            with self.subTest(input_mode=input_mode), patch.dict(os.environ, {"VISION_INPUT_MODE": input_mode}), patch(
+                "services.llm_gateway.extract_ktp_locally", return_value=({slot: "PELAPOR DUMMY"}, {slot: 0.91}),
+            ) as local:
+                raw = image_bytes()
+                result = await LLMGatewayService(transport=httpx.MockTransport(forbidden)).extract("ktp", raw, "image/png")
+                local.assert_called_once_with(raw)
+                self.assertFalse(result.simulated)
+                self.assertEqual(result.values, {slot: "PELAPOR DUMMY"})
+                self.assertEqual(result.confidence, {slot: 0.91})
 
     async def test_remote_chat_requests_only_delta_and_supports_json_object(self):
-        slot = "tahap1.nama_pelapor"
+        slot = "tahap4.nama_penyelenggara_layanan_korban"
         requests = []
 
         def handler(request):
@@ -135,12 +156,33 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(body["model"], "chat-test")
             self.assertEqual(body["response_format"], {"type": "json_object"})
             self.assertNotIn("secret", body["messages"][1]["content"])
-            return completion([{"field": slot, "value": "PELAPOR DUMMY", "confidence": 1.0}])
+            self.assertNotIn("PELAPOR DUMMY", body["messages"][1]["content"])
+            self.assertIn("[NAMA_PELAPOR_1]", body["messages"][1]["content"])
+            return completion([{"field": slot, "value": "BNI", "confidence": 1.0}])
 
         os.environ.update(AI_MODE="remote", AI_RESPONSE_FORMAT="json_object")
-        result = await LLMGatewayService(transport=httpx.MockTransport(handler)).extract_chat("Nama saya PELAPOR DUMMY", [slot], {"api_key": "secret"})
-        self.assertEqual(result.values[slot], "PELAPOR DUMMY")
+        context = {"api_key": "secret", "values": {"tahap1.nama_pelapor": "PELAPOR DUMMY"}}
+        result = await LLMGatewayService(transport=httpx.MockTransport(handler)).extract_chat("Bank saya BNI; nama saya PELAPOR DUMMY", [slot], context)
+        self.assertEqual(result.values[slot], "BNI")
         self.assertEqual(len(requests), 1)
+
+    async def test_private_single_field_corrections_never_reach_provider(self):
+        os.environ["AI_MODE"] = "remote"
+
+        def forbidden(request):
+            self.fail("Private single-field corrections must stay local")
+
+        gateway = LLMGatewayService(transport=httpx.MockTransport(forbidden))
+        cases = (
+            ("tahap1.nama_pelapor", "Nama saya PELAPOR DUMMY", "PELAPOR DUMMY"),
+            ("tahap1.nomor_identitas", "0000000000000000", "0000000000000000"),
+        )
+        for slot, text, expected in cases:
+            with self.subTest(slot=slot):
+                result = await gateway.extract_chat(text, [slot], {})
+                self.assertFalse(result.simulated)
+                self.assertEqual(result.values, {slot: expected})
+                self.assertEqual(result.confidence, {slot: 1.0})
 
     async def test_sumopod_configuration_routes_chat_and_vision_without_exposing_key(self):
         for name in ("AI_BASE_URL", "VISION_MODEL_NAME", "CHAT_MODEL_NAME", "AI_RESPONSE_FORMAT"):
@@ -151,33 +193,40 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(str(request.url), "https://ai.sumopod.com/v1/chat/completions")
             self.assertEqual(request.headers["Authorization"], "Bearer sumopod-test-secret")
             body = json.loads(request.content)
-            self.assertEqual(body["model"], "deepseek-v4-flash-vision-exp" if isinstance(body["messages"][1]["content"], list) else "deepseek-v4-flash")
+            vision = isinstance(body["messages"][1]["content"], list)
+            self.assertEqual(body["model"], "gemini/gemini-3.5-flash-lite" if vision else "deepseek-v4-flash")
             self.assertEqual(body["response_format"], {"type": "json_object"})
+            self.assertIn("Output JSON schema", body["messages"][0]["content"])
             self.assertNotIn("sumopod-test-secret", request.content.decode())
             calls.append(body["messages"][1]["content"])
-            return completion([{"field": "tahap1.nama_pelapor", "value": "PELAPOR DUMMY", "confidence": 0.98}])
+            slot = "tahap4.daftar_penyelenggara_terlapor.0.nama_penyelenggara" if vision else "tahap4.nama_penyelenggara_layanan_korban"
+            value = "BCA" if vision else "BNI"
+            return completion([{"field": slot, "value": value, "confidence": 0.98}])
         gateway = LLMGatewayService(transport=httpx.MockTransport(handler))
         self.assertFalse(gateway.simulated)
-        await gateway.extract("ktp", image_bytes(), "image/png")
-        await gateway.extract_chat("Nama saya PELAPOR DUMMY", ["tahap1.nama_pelapor"], {})
+        await gateway.extract("bukti_transfer", image_bytes(), "image/png")
+        await gateway.extract_chat("Bank saya BNI", ["tahap4.nama_penyelenggara_layanan_korban"], {})
         self.assertIsInstance(calls[0], list)
         self.assertIsInstance(calls[1], str)
 
     async def test_local_ocr_sends_only_extracted_text_to_configured_chat_model(self):
         os.environ.update(AI_MODE="remote", VISION_INPUT_MODE="ocr_text")
+        slot = "tahap2.daftar_informasi_terlapor.0.nama_terlapor"
         def handler(request):
             body = json.loads(request.content)
             self.assertEqual(body["model"], "chat-test")
             content = body["messages"][1]["content"]
             self.assertIsInstance(content, str)
-            self.assertIn("NAMA: PELAPOR DUMMY", content)
+            self.assertIn("Nama terlapor:", content)
+            self.assertNotIn("Budi Santoso", content)
             self.assertNotIn("image_url", request.content.decode())
-            return completion([{"field": "tahap1.nama_pelapor", "value": "PELAPOR DUMMY", "confidence": 0.97}])
-        with patch("services.llm_gateway.local_ocr_text", return_value="NAMA: PELAPOR DUMMY") as ocr:
-            result = await LLMGatewayService(transport=httpx.MockTransport(handler)).extract("ktp", image_bytes(), "image/png")
+            token = re.search(r"\[[A-Z][A-Z0-9_]*_[0-9]+\]", content)[0]
+            return completion([{"field": slot, "value": token, "confidence": 0.97}])
+        with patch("services.llm_gateway.local_ocr_text", return_value="Nama terlapor: Budi Santoso") as ocr:
+            result = await LLMGatewayService(transport=httpx.MockTransport(handler)).extract("bukti_chat", image_bytes(), "image/png")
             ocr.assert_called_once()
         self.assertFalse(result.simulated)
-        self.assertEqual(result.values["tahap1.nama_pelapor"], "PELAPOR DUMMY")
+        self.assertEqual(result.values[slot], "Budi Santoso")
 
     async def test_empty_or_failed_local_ocr_never_calls_provider_or_invents_data(self):
         os.environ.update(AI_MODE="remote", VISION_INPUT_MODE="ocr_text")
@@ -185,21 +234,39 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             self.fail("OCR failure must stop before the provider")
         for value, error in [("", None), (None, ImageProcessingError("OCR belum berhasil"))]:
             with self.subTest(value=value), patch("services.llm_gateway.local_ocr_text", return_value=value, side_effect=error), self.assertRaises(GatewayError):
-                await LLMGatewayService(transport=httpx.MockTransport(forbidden)).extract("ktp", image_bytes(), "image/png")
+                await LLMGatewayService(transport=httpx.MockTransport(forbidden)).extract("bukti_chat", image_bytes(), "image/png")
 
     async def test_provider_cannot_change_action_fields_or_confidence(self):
         os.environ["AI_MODE"] = "remote"
+        slot = "tahap4.daftar_penyelenggara_terlapor.0.nama_penyelenggara"
         examples = [
             [{"field": "tahap5.setuju_syarat_dan_ketentuan", "value": "true", "confidence": 1.0}],
-            [{"field": "tahap1.nama_pelapor", "value": "DUMMY", "confidence": 1.1}],
-            [{"field": "tahap1.nama_pelapor", "value": "DUMMY", "confidence": -0.1}],
-            [{"field": "tahap1.nama_pelapor", "value": "DUMMY", "confidence": True}],
-            [{"field": "tahap1.nama_pelapor", "value": {"execute": "submit"}, "confidence": 0.9}],
-            [{"field": "tahap1.nama_pelapor", "value": "DUMMY", "confidence": 0.9}] * 2,
+            [{"field": slot, "value": "BCA", "confidence": 1.1}],
+            [{"field": slot, "value": "BCA", "confidence": -0.1}],
+            [{"field": slot, "value": "BCA", "confidence": True}],
+            [{"field": slot, "value": {"execute": "submit"}, "confidence": 0.9}],
+            [{"field": slot, "value": "BCA", "confidence": 0.9}] * 2,
         ]
         for slots in examples:
             with self.subTest(slots=slots), self.assertRaises(GatewayError):
-                await LLMGatewayService(transport=httpx.MockTransport(lambda request: completion(slots))).extract("ktp", image_bytes(), "image/png")
+                await LLMGatewayService(transport=httpx.MockTransport(lambda request: completion(slots))).extract("bukti_transfer", image_bytes(), "image/png")
+
+    async def test_missing_vision_confidence_requires_human_review(self):
+        os.environ["AI_MODE"] = "remote"
+        slot = "tahap4.daftar_penyelenggara_terlapor.0.nama_penyelenggara"
+        gateway = LLMGatewayService(transport=httpx.MockTransport(lambda request: completion([{"field": slot, "value": "BCA"}])))
+        result = await gateway.extract("bukti_transfer", image_bytes(), "image/png")
+        self.assertEqual(result.values[slot], "BCA")
+        self.assertEqual(result.confidence[slot], 0.0)
+
+    async def test_model_access_and_name_errors_are_actionable_without_provider_details(self):
+        os.environ["AI_MODE"] = "remote"
+        for status, expected in ((403, "izin model"), (404, "prefix provider")):
+            with self.subTest(status=status), self.assertRaises(GatewayError) as caught:
+                await LLMGatewayService(transport=httpx.MockTransport(lambda request: httpx.Response(status, text="private provider token"))).extract("bukti_transfer", image_bytes(), "image/png")
+            self.assertIn("HTTP " + str(status), str(caught.exception))
+            self.assertIn(expected, str(caught.exception))
+            self.assertNotIn("private", str(caught.exception))
 
     async def test_partial_refusal_and_network_failure_never_generate_dummy(self):
         os.environ["AI_MODE"] = "remote"
@@ -211,14 +278,14 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         ]
         for transport in transports:
             with self.subTest(transport=transport), self.assertRaises(GatewayError) as caught:
-                await LLMGatewayService(transport=transport).extract("ktp", image_bytes(), "image/png")
+                await LLMGatewayService(transport=transport).extract("bukti_transfer", image_bytes(), "image/png")
             self.assertNotIn("private", str(caught.exception))
 
         def timeout(request):
             raise httpx.ReadTimeout("sensitive server detail", request=request)
 
         with self.assertRaises(GatewayError) as caught:
-            await LLMGatewayService(transport=httpx.MockTransport(timeout)).extract("ktp", image_bytes(), "image/png")
+            await LLMGatewayService(transport=httpx.MockTransport(timeout)).extract("bukti_transfer", image_bytes(), "image/png")
         self.assertIn("tidak diganti", str(caught.exception))
         self.assertNotIn("sensitive", str(caught.exception))
 

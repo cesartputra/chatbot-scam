@@ -14,6 +14,8 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from services.image_processor import ImageProcessingError, local_ocr_text
 from services.normalizer import normalize_ktp_slot
+from services.ktp_ocr import extract_ktp_locally
+from services.privacy import PrivacyError, PrivacyMasker, sensitive_kind
 
 
 class GatewayError(ValueError):
@@ -182,7 +184,7 @@ class LLMGatewayService:
         self.api_key = os.getenv("AI_API_KEY", "").strip()
         self.simulated = self.mode == "simulation" or (self.mode == "auto" and not self.api_key)
         self.base_url = os.getenv("AI_BASE_URL", "https://ai.sumopod.com/v1").strip().rstrip("/")
-        self.vision_model = os.getenv("VISION_MODEL_NAME", "deepseek-v4-flash-vision-exp").strip()
+        self.vision_model = os.getenv("VISION_MODEL_NAME", "gemini/gemini-3.5-flash-lite").strip()
         self.chat_model = os.getenv("CHAT_MODEL_NAME", "deepseek-v4-flash").strip()
         self.response_format = os.getenv("AI_RESPONSE_FORMAT", "json_object").strip()
         self.vision_input_mode = os.getenv("VISION_INPUT_MODE", "image").strip()
@@ -190,7 +192,7 @@ class LLMGatewayService:
             raise GatewayError("VISION_INPUT_MODE harus image atau ocr_text.")
         self.transport = transport
         try:
-            self.timeout = float(os.getenv("AI_TIMEOUT_SECONDS", "35"))
+            self.timeout = float(os.getenv("AI_TIMEOUT_SECONDS", "60"))
         except ValueError:
             raise GatewayError("AI_TIMEOUT_SECONDS harus berupa angka.") from None
         if not math.isfinite(self.timeout) or not 0 < self.timeout <= 120:
@@ -217,6 +219,12 @@ class LLMGatewayService:
         allowed = set(SIMULATION_VALUES[kind])
         if self.simulated:
             return _validated_result([_Slot(field=key, value=value, confidence=0.98) for key, value in SIMULATION_VALUES[kind].items()], allowed, True)
+        if kind == "ktp":
+            try:
+                values, confidence = await asyncio.to_thread(extract_ktp_locally, image_bytes)
+            except ImageProcessingError as exc:
+                raise GatewayError(str(exc)) from None
+            return _validated_result([_Slot(field=key, value=value, confidence=confidence[key]) for key, value in values.items()], allowed, False, allow_partial=True)
         if self.vision_input_mode == "ocr_text":
             try:
                 text = await asyncio.to_thread(local_ocr_text, image_bytes)
@@ -245,10 +253,17 @@ class LLMGatewayService:
                 return _validated_result(slots, allowed, self.simulated)
         if self.simulated:
             return self._simulation_chat(text, allowed_slots)
+        if len(allowed) == 1 and (kind := sensitive_kind(allowed_slots[0])):
+            # Private single-field corrections need validation, not cloud inference.
+            value = text.strip()
+            if kind.startswith("NAMA"):
+                value = re.sub(r"^(?:nama\s+(?:saya|pelapor|terlapor|korban)|saya\s+bernama|atas\s+nama)\s*[:=]?\s*", "", value, flags=re.I)
+            result = self._simulation_chat(value, allowed_slots)
+            return result.model_copy(update={"simulated": False})
         visible = context.get("values", context)
         safe_context = {k: v for k, v in visible.items() if _path_allowed(k) and isinstance(v, (str, int, float, Decimal))} if isinstance(visible, dict) else {}
         content = "Previously validated context (do not overwrite): " + json.dumps(safe_context, ensure_ascii=False, default=str)[:16000] + "\nUntrusted user answer: " + text
-        return await self._remote(self.chat_model, content, allowed)
+        return await self._remote(self.chat_model, content, allowed, privacy_context=safe_context)
 
     async def extract_contacts(self, text: str) -> ExtractionResult:
         """Use only contacts the person actually typed, without model inference."""
@@ -286,7 +301,7 @@ class LLMGatewayService:
             "Observed incident timestamp: " + json.dumps(incident, ensure_ascii=False)
             + "\nUntrusted user story: " + narrative
         )
-        result = await self._remote(self.chat_model, content, allowed)
+        result = await self._remote(self.chat_model, content, allowed, privacy_context=visible, preserve_sensitive=True)
         if STORY_SLOT not in result.values:
             raise GatewayError("AI belum menghasilkan kronologi. Coba kirim ulang cerita singkat Anda.")
         if INCIDENT_SLOT in result.values and result.values[INCIDENT_SLOT] != incident:
@@ -344,7 +359,15 @@ class LLMGatewayService:
             slots.append(_Slot(field=key, value=value, confidence=1.0))
         return _validated_result(slots, set(allowed_slots), True)
 
-    async def _remote(self, model: str, content: object, allowed: set[str], *, allow_partial: bool = False) -> ExtractionResult:
+    async def _remote(self, model: str, content: object, allowed: set[str], *, allow_partial: bool = False, privacy_context: dict | None = None, preserve_sensitive: bool = False) -> ExtractionResult:
+        try:
+            masker = PrivacyMasker(privacy_context or {})
+            if isinstance(content, str):
+                content = masker.mask_text(content)
+            else:
+                content = [{**item, "text": masker.mask_text(item["text"])} if item.get("type") == "text" else item for item in content]
+        except PrivacyError:
+            raise GatewayError("Data pribadi belum dapat disamarkan. Koreksi pesan atau isi kolom secara manual.") from None
         schema = _Envelope.model_json_schema()
         schema["$defs"]["_Slot"]["properties"]["field"]["enum"] = sorted(allowed)
         response_format = {"type": self.response_format}
@@ -357,8 +380,12 @@ class LLMGatewayService:
             "Use Indonesian dates, e.g. 19 Oktober 2026 10:00:00 (transaction), 19 Oktober 2026 10:00 (incident), 1 Oktober 1990 (birth). "
             "Use gender Laki-laki/Perempuan, religion Islam/Kristen/Katolik/Hindu/Buddha/Konghucu/Tidak Diketahui, and identity type KTP/Paspor/KITAS. KTP NIK must be exactly 16 visible digits; never guess or pad digits. "
             "Amounts are numeric IDR. confidence must be finite 0 to 1. Omit absent facts. Chronology may summarize supplied facts in Indonesian, never add facts, maximum 4000 characters. "
+            "Private values are replaced by typed opaque placeholders in square brackets. Preserve these placeholders exactly in output strings, including chronology; never infer or invent their contents or new placeholders. The mapping stays on the local server. "
             "Allowed fields: " + json.dumps(sorted(allowed))
         )
+        if self.response_format == "json_object":
+            prompt += "\nEvery slot MUST include field, value AND confidence (0 to 1), even if the field name contains extraction_confidence. Output JSON schema: " + json.dumps(schema, ensure_ascii=False)
+            prompt += '\nExample shape: {"slots":[{"field":' + json.dumps(sorted(allowed)[0]) + ',"value":null,"confidence":0.0}]}'
         headers = {"Authorization": "Bearer " + self.api_key} if self.api_key else {}
         try:
             async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport, trust_env=False, follow_redirects=False) as client:
@@ -372,11 +399,34 @@ class LLMGatewayService:
             message = response.json()["choices"][0]
             if message.get("finish_reason") != "stop" or message["message"].get("tool_calls") or message["message"].get("refusal"):
                 raise GatewayError("AI tidak menghasilkan ekstraksi lengkap. Isi manual atau coba kembali.")
-            envelope = _Envelope.model_validate_json(message["message"]["content"])
+            payload = json.loads(message["message"]["content"])
+            if allow_partial and isinstance(payload, dict) and isinstance(payload.get("slots"), list):
+                for slot in payload["slots"]:
+                    if isinstance(slot, dict) and "confidence" not in slot:
+                        # Missing confidence must require human review, never imply reliable OCR.
+                        slot["confidence"] = 0.0
+            envelope = _Envelope.model_validate(payload)
+            if preserve_sensitive:
+                story = next((slot.value for slot in envelope.slots if slot.field == STORY_SLOT), "")
+                if not isinstance(story, str) or any(token in content and token not in story for token in masker.tokens):
+                    raise GatewayError("AI menghilangkan penanda data pribadi pada kronologi. Coba ulangi atau isi manual.")
+            for slot in envelope.slots:
+                slot.value = masker.restore(slot.value)
             return _validated_result(envelope.slots, allowed, False, allow_partial=allow_partial)
         except httpx.TimeoutException:
             raise GatewayError("Layanan AI melewati batas waktu. Data tidak diganti dengan data simulasi; coba lagi atau isi manual.") from None
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            if status in {401, 403}:
+                raise GatewayError("Akses model AI ditolak (HTTP " + str(status) + "). Periksa key, izin model, dan routing provider Sumopod; satu key dapat dipakai chat dan vision bila diizinkan.") from None
+            if status in {400, 404}:
+                raise GatewayError("Model atau format AI tidak dikenali (HTTP " + str(status) + "). Gunakan ID model persis dari /v1/models, termasuk prefix provider.") from None
+            if status == 429:
+                raise GatewayError("Batas pemakaian AI tercapai (HTTP 429). Periksa kuota/saldo Sumopod atau coba beberapa saat lagi.") from None
+            raise GatewayError("Layanan AI tidak tersedia (HTTP " + str(status) + "). Coba lagi atau isi manual.") from None
         except httpx.HTTPError:
             raise GatewayError("Layanan AI tidak tersedia. Periksa konfigurasi; coba lagi atau isi manual.") from None
+        except PrivacyError:
+            raise GatewayError("AI mengubah penanda data pribadi. Data tidak disimpan; coba ulangi atau isi manual.") from None
         except (ValidationError, KeyError, IndexError, TypeError, json.JSONDecodeError, UnicodeDecodeError):
             raise GatewayError("Format respons AI tidak valid; coba kembali atau isi manual.") from None
