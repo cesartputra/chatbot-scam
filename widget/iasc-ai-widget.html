@@ -150,7 +150,7 @@ function quickReplies(snapshot) {
   const examples = {CONTACT_INPUT:'80000000000, pelapor.dummy@example.com',CHRONOLOGY_INPUT:'Pada 19 Oktober 2026 pukul 10.00 WIB, saya mendapat tawaran barang melalui WhatsApp. Setelah transfer Rp100.000, barang tidak dikirim dan penjual tidak menjawab. Ini cerita dummy untuk simulasi.'};
   if (snapshot.simulation && examples[turn]) { const button = element('button',turn === 'CONTACT_INPUT' ? 'Coba kontak dummy' : 'Coba cerita dummy','demo-chip'); button.type = 'button'; button.addEventListener('click',() => sendText(examples[turn])); $('quick-replies').append(button); }
 }
-async function receive(snapshot) {
+async function receive(snapshot, {replyToUser = false} = {}) {
   if (!snapshot?.session_id || !snapshot.data) throw new Error('Respons sesi tidak lengkap. Muat ulang halaman untuk memulai sesi baru.');
   session = snapshot;
   const step = Math.max(1,Math.min(5,Number(snapshot.active_wizard_step || 1)));
@@ -164,7 +164,7 @@ async function receive(snapshot) {
   summaryCard(snapshot);
   const message = snapshot.assistant_message || snapshot.reply || snapshot.question || 'Saya siap membantu Anda melengkapi laporan.';
   const key = snapshot.revision + ':' + (snapshot.current_state || snapshot.state) + ':' + message;
-  if (key !== lastAssistantKey) { bubble('assistant',message); lastAssistantKey = key; }
+  if (replyToUser || key !== lastAssistantKey) { bubble('assistant',message); lastAssistantKey = key; }
   if (snapshot.manual_url) { const link = element('a','Lanjutkan pada formulir manual ↗','fallback-link'); link.href = '/Guest/LaporanV2'; link.target = '_top'; $('messages').append(link); }
   const result = snapshot.result;
   if (result?.simulated === true && result.submitted === false && /^SIM-[A-Za-z0-9-]+$/.test(result.ticket_number || '')) {
@@ -188,7 +188,7 @@ async function run(callback, label) {
 }
 async function sendText(text, action) {
   const value = String(text || '').trim(); if (!value || busy || !session) return;
-  await run(async () => { bubble('user',value); $('chat-input').value = ''; await receive(await request(endpoint('chat'),{text:value,...(action ? {action} : {})})); },'Asisten sedang menyiapkan jawaban…');
+  await run(async () => { bubble('user',value); $('chat-input').value = ''; await receive(await request(endpoint('chat'),{text:value,...(action ? {action} : {})}),{replyToUser:true}); },'Asisten sedang menyiapkan jawaban…');
 }
 async function uploadFile(file, alreadyBusy = false) {
   if (!file || !session?.expected_upload_type) throw new Error('Saat ini asisten sedang meminta jawaban teks. Ikuti pertanyaan di chat terlebih dahulu.');

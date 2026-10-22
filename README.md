@@ -56,6 +56,8 @@ Chat hanya memiliki satu tombol lampiran, satu input teks, tombol kirim, dan jaw
 
 Setiap respons membawa perubahan field. Replika mengisinya satu per satu dengan jeda **120 ms**, menyorot/menggulir field, mengisi radio/dropdown/tanggal/lampiran serta tabel bersarang, lalu berpindah ke tahap aktif. Isian manual yang sudah ada dipertahankan dan konflik diberitahukan. Sesi baru menghapus isian hasil AI sebelumnya sambil mempertahankan perubahan manual.
 
+Pada Tahap 2, **media** seperti WhatsApp berbeda dari **detail media** berupa nomor kontak, `@username`, atau tautan lengkap pelaku. Nilai eksplisit ini diparsing lokal. Sapaan seperti `halo` mengulang panduan saat ini; ekstraksi AI kosong atau jawaban yang tidak dapat diterapkan menampilkan penjelasan tanpa mengubah draft. Balasan tetap terlihat ketika pertanyaan/revisi sesi belum berubah.
+
 Formulir manual tetap tersedia bila AI gagal. **Simpan Simulasi Lokal** menyimpan metadata di localStorage browser dengan `SIM-…`, `simulated:true`, `submitted:false`; berkas asli tidak disimpan di sana. Isian aktif/file di memori tab hilang saat halaman dimuat ulang. Metadata tiket dapat dihapus melalui Cek Laporan. Tombol kirim laporan resmi dinonaktifkan.
 
 ## Struktur proyek
@@ -224,6 +226,6 @@ Integrasi ASP.NET resmi masih memerlukan kontrak field/master ID, tabel modal, t
 node --test tests/*.test.mjs
 ```
 
-**117 tes Python, 124 subtest, dan 24 tes Node lulus** pada pemeriksaan 22 Oktober 2026. Cakupan meliputi peluncur/dependensi, OCR KTP lokal, masking/pemulihan data pribadi, urutan percakapan, kontak alami, kronologi aktual, bukti tambahan, confidence, koreksi atomik, kepemilikan file, CAPTCHA, integrasi mock, mapping progresif, revisi, dan isian manual. Uji API aplikasi dengan Sumopod nyata berhasil mencapai ringkasan tahap 5 tanpa submit/CAPTCHA. Hasil serta batas pemeriksaan dicatat dalam `TEST_RESULTS.md`; on-premise dan backend ASP.NET resmi belum diuji.
+**122 tes Python, 130 subtest, dan 26 tes Node lulus** pada pemeriksaan 22 Oktober 2026. Cakupan meliputi peluncur/dependensi, OCR KTP lokal, masking/pemulihan data pribadi, urutan percakapan, kontak alami, kronologi aktual, bukti tambahan, confidence, koreksi atomik, kepemilikan file, CAPTCHA, integrasi mock, mapping progresif, revisi, dan isian manual. Uji API aplikasi dengan Sumopod nyata berhasil mencapai ringkasan tahap 5 tanpa submit/CAPTCHA. Regresi chat yang tidak merespons pada Tahap 2 diuji melalui API, skrip widget, dan browser dengan sesi dummy. Hasil serta batas pemeriksaan dicatat dalam `TEST_RESULTS.md`; on-premise dan backend ASP.NET resmi belum diuji.
 
 Referensi: [FastAPI multipart uploads](https://fastapi.tiangolo.com/tutorial/request-files/), [Pydantic validators](https://docs.pydantic.dev/latest/concepts/validators/), [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs). Sumber/hak aset tercatat dalam `static/replica/assets/NOTICE.md`.

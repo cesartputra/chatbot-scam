@@ -318,11 +318,16 @@ async def chat_v1(session_id: str, body: ChatInput):
             elif current_errors(candidate):
                 item = current_errors(candidate)[0]
                 path = item["path"]
+                if normalized.strip(" .!?") in {"halo", "hai", "hi", "help", "bantuan", "saya bingung", "tidak mengerti", "maksudnya apa"}:
+                    return view(session, before)
                 if action == "confirm_value" and item["reason"] == "low_confidence":
                     apply_patch(candidate, {path: get_path(candidate.data, path)}, {}, "manual", manual=True)
                 else:
                     result = await gateway().extract_chat(text, [path], {"values": dict(flattened(candidate.data))})
+                    revision = candidate.revision
                     apply_patch(candidate, result.values, result.confidence, "chat" if result.simulated else "chat_ai", manual=result.simulated)
+                    if candidate.revision == revision:
+                        raise HTTPException(422, "Saya belum menemukan jawaban untuk kolom ini. " + item["question"])
             else:
                 raise HTTPException(409, "Silakan unggah satu dokumen yang sedang diminta melalui tombol lampiran.")
         except GatewayError as exc:

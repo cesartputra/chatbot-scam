@@ -6,8 +6,8 @@ Entry point `main:app`, Python 3.14.4 pada macOS. Uji cloud hanya memakai fixtur
 
 | Suite | Hasil |
 | --- | --- |
-| Python: `.venv/bin/python -m pytest -q` | **117 lulus, 124 subtest lulus** |
-| JavaScript: `node --test tests/*.test.mjs` | **24 lulus, 0 gagal** |
+| Python: `.venv/bin/python -m pytest -q` | **122 lulus, 130 subtest lulus** |
+| JavaScript: `node --test tests/*.test.mjs` | **26 lulus, 0 gagal** |
 
 Python meliputi:
 
@@ -44,6 +44,14 @@ Node meliputi validasi fase/modal, dokumen perwakilan, parsing nominal dan tangg
 - Screenshot kelima tahap lokal disimpan sebagai artefak pengujian terpisah. Pemeriksaan ini memakai browser in-app pada ukuran default; belum mencakup seluruh perangkat.
 
 Satu warning deprecation Starlette/httpx muncul pada pytest; tidak ada tes gagal.
+
+## Regresi chat berhenti pada detail media Tahap 2
+
+- Penyebab direproduksi: hasil ekstraksi kosong menghasilkan respons sukses dengan revisi/pertanyaan tetap; widget menyembunyikan balasan sebagai duplikat. Nilai yang dibuang normalizer juga dapat menghasilkan keadaan ini.
+- Server kini memberi penjelasan bila ekstraksi tidak mengisi kolom yang diminta, termasuk normalisasi kosong dan nilai manual yang dilindungi. Draft tetap atomik. Widget selalu menampilkan balasan untuk pesan baru, sedangkan pembacaan ulang status tetap menghindari duplikasi.
+- Pertanyaan membedakan media (WhatsApp, Instagram, dll.) dari detail kontaknya. Nama media, nomor telepon, `@username`, dan URL eksplisit diparsing lokal. Pengulangan nama media tidak dimasukkan sebagai detail. Sapaan `halo` menampilkan panduan tanpa API AI; data yang tidak tersedia tidak ditebak.
+- Lima tes Python baru dan dua tes Node baru mencakup ekstraksi kosong, normalizer yang membuang nilai, perlindungan isian manual, balasan identik berulang, error terlihat, pemulihan status, dan input eksplisit tanpa provider.
+- Browser in-app diuji pada server sementara dengan fixture sesi parsial tahap 2: `whatsapp` → pertanyaan nomor/username/tautan → `whatsapp` lagi → penjelasan terlihat → `halo` → panduan terlihat → nomor dummy → pilihan lanjut Tahap 3. Screenshot disimpan sebagai artefak terpisah. Server/tab pengujian dibersihkan; tidak ada submit, CAPTCHA, atau panggilan Sumopod nyata pada regresi ini.
 
 ## Diagnosis instalasi dari clone baru
 

@@ -13,7 +13,7 @@ from typing import Annotated
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from services.image_processor import ImageProcessingError, local_ocr_text
-from services.normalizer import normalize_ktp_slot
+from services.normalizer import normalize_ktp_slot, normalize_media
 from services.ktp_ocr import extract_ktp_locally
 from services.privacy import PrivacyError, PrivacyMasker, sensitive_kind
 
@@ -246,6 +246,27 @@ class LLMGatewayService:
             raise GatewayError("Daftar kolom chat tidak valid.")
         if not allowed:
             return ExtractionResult(simulated=self.simulated)
+        if len(allowed) == 1:
+            path = allowed_slots[0]
+            value = None
+            if path.endswith(".sumber_media_informasi_penipuan"):
+                value = normalize_media(text)
+            elif path.endswith(".detail_sumber_media_informasi_penipuan"):
+                if normalize_media(text):
+                    raise GatewayError("Nama media sudah tercatat. Untuk detailnya, ketik nomor kontak pelaku, username seperti @akun_contoh, atau tautan lengkap seperti https://example.com.")
+                try:
+                    parsed = urlsplit(text.strip())
+                except ValueError:
+                    raise GatewayError("Tautan belum valid. Ketik nomor kontak, @username, atau tautan lengkap yang benar.") from None
+                phone = re.fullmatch(r"\+?[0-9][0-9 ()-]{6,24}[0-9]", text.strip())
+                if (
+                    (phone and 8 <= len(re.sub(r"\D", "", text)) <= 15)
+                    or re.fullmatch(r"@[A-Za-z0-9_.]{2,100}", text.strip())
+                    or (parsed.scheme in {"http", "https"} and parsed.hostname and not re.search(r"\s", text))
+                ):
+                    value = text.strip()
+            if value is not None:
+                return _validated_result([_Slot(field=path, value=value, confidence=1.0)], allowed, self.simulated)
         if allowed <= {PHONE_SLOT, EMAIL_SLOT} and not re.search(r"(?:^|\n)\s*(?:tahap[1-5]\.|nomor hp\s*[=:]|telepon\s*[=:]|email\s*[=:])", text, re.I):
             result = await self.extract_contacts(text)
             slots = [_Slot(field=key, value=value, confidence=result.confidence[key]) for key, value in result.values.items() if key in allowed]

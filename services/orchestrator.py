@@ -292,7 +292,14 @@ def stage_errors(session):
             continue
         seen.add(error["path"])
         label = LABELS.get(error["path"].split(".")[-1], error["path"].split(".")[-1].replace("_", " ").capitalize())
-        result.append({**error, "label": label, "question": f"Mohon {'periksa dan konfirmasi' if error['reason'] == 'low_confidence' else 'lengkapi'} {label}."})
+        question = f"Mohon {'periksa dan konfirmasi' if error['reason'] == 'low_confidence' else 'lengkapi'} {label}."
+        if error["reason"] != "low_confidence":
+            if error["path"].endswith(".sumber_media_informasi_penipuan"):
+                question = "Melalui media apa penipuan terjadi? Misalnya WhatsApp, Instagram, Telegram, atau Website."
+            elif error["path"].endswith(".detail_sumber_media_informasi_penipuan"):
+                media = get_path(session.data, error["path"].rsplit(".", 1)[0] + ".sumber_media_informasi_penipuan")
+                question = f"Media {media or 'penipuan'} sudah tercatat. Sekarang ketik nomor kontak pelaku, username seperti @akun_contoh, atau tautan lengkap seperti https://example.com."
+        result.append({**error, "label": label, "question": question})
     return result
 
 
