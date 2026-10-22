@@ -25,6 +25,14 @@ bash start.sh
 
 Pastikan `AI_MODE=auto` dan `AI_API_KEY` kosong untuk demo tanpa provider. Peluncuran pertama membuat `.venv` dan memasang `requirements.txt`, sehingga memerlukan akses indeks paket. `.env` dimuat otomatis; environment yang sudah diekspor diutamakan. Peluncur memakai `uvicorn main:app` pada **127.0.0.1:8787**, satu worker, tanpa access log. Hentikan dengan Ctrl+C. Untuk port lain: `PORT=8788 bash start.sh`.
 
+Jika instalasi menampilkan `ConnectionResetError` lalu `from versions: none`, koneksi indeks terputus sebelum pip mendapat daftar versi. FastAPI `0.153.0` tersedia di [PyPI](https://pypi.org/project/fastapi/0.153.0/); jangan mengubah pin paket berdasarkan pesan jaringan tersebut. Coba satu peluncuran dengan indeks resmi:
+
+```bash
+PIP_INDEX_URL=https://pypi.org/simple bash start.sh
+```
+
+Jika masih terputus, coba hotspot/jaringan lain dan periksa proxy/VPN. Peluncur memakai timeout 60 detik, lima retry, dan cache pip; konfigurasi indeks/proxy/sertifikat Anda tetap berlaku. Penanda dependensi hanya dibuat setelah instalasi sukses, sehingga kegagalan dapat dicoba ulang tanpa menghapus `.venv` atau `.env`.
+
 | Halaman | Alamat lokal |
 | --- | --- |
 | Beranda replika | [Beranda](http://127.0.0.1:8787/) |
@@ -216,6 +224,6 @@ Integrasi ASP.NET resmi masih memerlukan kontrak field/master ID, tabel modal, t
 node --test tests/*.test.mjs
 ```
 
-**114 tes Python, 124 subtest, dan 24 tes Node lulus** pada pemeriksaan 22 Oktober 2026. Cakupan meliputi OCR KTP lokal, masking/pemulihan data pribadi, urutan percakapan, kontak alami, kronologi aktual, bukti tambahan, confidence, koreksi atomik, kepemilikan file, CAPTCHA, integrasi mock, mapping progresif, revisi, dan isian manual. Uji API aplikasi dengan Sumopod nyata berhasil mencapai ringkasan tahap 5 tanpa submit/CAPTCHA. Hasil serta batas pemeriksaan dicatat dalam `TEST_RESULTS.md`; on-premise dan backend ASP.NET resmi belum diuji.
+**117 tes Python, 124 subtest, dan 24 tes Node lulus** pada pemeriksaan 22 Oktober 2026. Cakupan meliputi peluncur/dependensi, OCR KTP lokal, masking/pemulihan data pribadi, urutan percakapan, kontak alami, kronologi aktual, bukti tambahan, confidence, koreksi atomik, kepemilikan file, CAPTCHA, integrasi mock, mapping progresif, revisi, dan isian manual. Uji API aplikasi dengan Sumopod nyata berhasil mencapai ringkasan tahap 5 tanpa submit/CAPTCHA. Hasil serta batas pemeriksaan dicatat dalam `TEST_RESULTS.md`; on-premise dan backend ASP.NET resmi belum diuji.
 
 Referensi: [FastAPI multipart uploads](https://fastapi.tiangolo.com/tutorial/request-files/), [Pydantic validators](https://docs.pydantic.dev/latest/concepts/validators/), [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs). Sumber/hak aset tercatat dalam `static/replica/assets/NOTICE.md`.

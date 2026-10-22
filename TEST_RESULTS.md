@@ -6,7 +6,7 @@ Entry point `main:app`, Python 3.14.4 pada macOS. Uji cloud hanya memakai fixtur
 
 | Suite | Hasil |
 | --- | --- |
-| Python: `.venv/bin/python -m pytest -q` | **114 lulus, 124 subtest lulus** |
+| Python: `.venv/bin/python -m pytest -q` | **117 lulus, 124 subtest lulus** |
 | JavaScript: `node --test tests/*.test.mjs` | **24 lulus, 0 gagal** |
 
 Python meliputi:
@@ -44,6 +44,13 @@ Node meliputi validasi fase/modal, dokumen perwakilan, parsing nominal dan tangg
 - Screenshot kelima tahap lokal disimpan sebagai artefak pengujian terpisah. Pemeriksaan ini memakai browser in-app pada ukuran default; belum mencakup seluruh perangkat.
 
 Satu warning deprecation Starlette/httpx muncul pada pytest; tidak ada tes gagal.
+
+## Diagnosis instalasi dari clone baru
+
+- FastAPI `0.153.0` diverifikasi tersedia lewat metadata resmi PyPI. Uji virtualenv kosong dengan indeks resmi tetap mendapat `Connection reset by peer`; `curl` dan HTTP client ke PyPI juga mendapat reset. Ini kegagalan akses jaringan sebelum daftar versi terbaca, bukan bukti pin paket tidak tersedia.
+- Peluncur mempertahankan konfigurasi indeks/proxy/sertifikat, menggunakan cache pip, timeout 60 detik dan lima retry. Pesan kegagalan memberi langkah diagnosis; versi dependensi tetap.
+- Tiga tes peluncur memakai proses Python tiruan: instalasi gagal tidak memulai server atau menulis marker, percobaan ulang berhasil, peluncuran berikutnya melewati pip, perubahan requirements memicu instalasi, dan indeks/port kustom tetap berlaku. `bash -n start.sh` lulus.
+- Instalasi nyata dari nol belum berhasil diverifikasi karena koneksi PyPI masih terputus. Server sementara dan direktori pengujian dibersihkan; tidak ada key AI atau data laporan yang dipakai.
 
 ## Pemeriksaan API Sumopod nyata
 
