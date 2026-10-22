@@ -1,4 +1,3 @@
-import json
 import os
 import unittest
 from unittest.mock import patch
@@ -15,7 +14,7 @@ class NaturalGatewayTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.env = patch.dict(os.environ, {
             "AI_MODE": "simulation", "AI_API_KEY": "", "AI_BASE_URL": "http://localhost:8000/v1",
-            "AI_RESPONSE_FORMAT": "json_schema", "AI_TIMEOUT_SECONDS": "10",
+            "AI_RESPONSE_FORMAT": "json_object", "AI_TIMEOUT_SECONDS": "10",
             "VISION_MODEL_NAME": "vision-test", "CHAT_MODEL_NAME": "chat-test",
         })
         self.env.start()
@@ -73,32 +72,25 @@ class NaturalGatewayTests(unittest.IsolatedAsyncioTestCase):
         gateway = LLMGatewayService()
         result = await gateway.synthesize_chronology("Pada 19 Oktober 2026 10:00 saya transfer. Pada 19 Oktober 2026 12:00 saya diblokir.", {})
         self.assertNotIn(INCIDENT_SLOT, result.values)
-        for story in ("x" * 4001, "Kejadian 31 Februari 2026 10:00."):
-            with self.subTest(story=story[:60]), self.assertRaises(GatewayError):
+        for story in ("x" * 2001, "Kejadian 31 Februari 2026 10:00."):
+            with self.subTest(story=story[:60]), self.assertRaises(ValueError):
                 await gateway.synthesize_chronology(story, {})
 
-    async def test_remote_chronology_keeps_uncertainty_and_rejects_unobserved_times(self):
+    async def test_remote_chronology_keeps_actual_facts_locally_without_llm_rewriting(self):
         os.environ["AI_MODE"] = "remote"
-        returned = [{"field": STORY_SLOT, "value": "Pelapor membeli sepatu yang tidak dikirim.", "confidence": 0.7}]
-        requests = []
 
-        def handler(request):
-            body = json.loads(request.content)
-            requests.append(body)
-            self.assertEqual(body["model"], "chat-test")
-            allowed = body["response_format"]["json_schema"]["schema"]["$defs"]["_Slot"]["properties"]["field"]["enum"]
-            self.assertEqual(set(allowed), {STORY_SLOT, INCIDENT_SLOT})
-            self.assertIn("sepatu", body["messages"][1]["content"])
-            self.assertNotIn("secret-key", body["messages"][1]["content"])
-            return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": json.dumps({"slots": returned})}}]})
+        def forbidden(request):
+            self.fail("Chronology must not be rewritten or augmented by the cloud model")
 
-        gateway = LLMGatewayService(transport=httpx.MockTransport(handler))
-        result = await gateway.synthesize_chronology("Saya membeli sepatu yang tidak dikirim.", {"api_key": "secret-key"})
-        self.assertEqual(result.confidence[STORY_SLOT], 0.7)
-        self.assertEqual(len(requests), 1)
-        returned.append({"field": INCIDENT_SLOT, "value": "19 Oktober 2026 10:00", "confidence": 0.9})
-        with self.assertRaises(GatewayError):
-            await gateway.synthesize_chronology("Saya membeli sepatu yang tidak dikirim.", {})
+        gateway = LLMGatewayService(transport=httpx.MockTransport(forbidden))
+        story = "Saya membeli sepatu yang tidak dikirim."
+        result = await gateway.synthesize_chronology(story, {"api_key": "secret-key"})
+        self.assertEqual(result.values[STORY_SLOT], story)
+        self.assertNotIn(INCIDENT_SLOT, result.values)
+        self.assertEqual(result.confidence[STORY_SLOT], 1.0)
+        self.assertFalse(result.simulated)
+        result = await gateway.synthesize_chronology("Pada 19 Oktober 2026 10:00 saya transfer untuk sepatu yang tidak dikirim.", {})
+        self.assertEqual(result.values[INCIDENT_SLOT], "19 Oktober 2026 10:00")
 
     async def test_simulation_documents_do_not_decide_workflow_or_replace_user_story(self):
         self.assertNotIn("tahap1.apakah_mengalami_sendiri", SIMULATION_VALUES["ktp"])

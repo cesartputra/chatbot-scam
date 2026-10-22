@@ -19,7 +19,7 @@
         <div id="chat" class="chat-log" role="log" aria-live="polite" aria-label="Percakapan laporan"></div>
         <div id="quick-replies" class="quick-replies"></div>
         <div id="error" class="error" role="alert" hidden></div>
-        <form id="composer" class="composer"><label class="upload-button" title="Unggah bukti transfer"><input type="file" id="evidence-input" accept="image/png,image/jpeg,image/webp"><span aria-hidden="true">＋</span><span class="sr-only">Unggah bukti transfer</span></label><label class="sr-only" for="message">Jawaban Anda</label><textarea id="message" rows="1" maxlength="4000" placeholder="Tulis jawaban Anda…"></textarea><button type="submit" id="send" aria-label="Kirim jawaban ke sesi lokal">↑</button></form>
+        <form id="composer" class="composer"><label class="upload-button" title="Unggah bukti transfer"><input type="file" id="evidence-input" accept="image/png,image/jpeg,image/webp"><span aria-hidden="true">＋</span><span class="sr-only">Unggah bukti transfer</span></label><label class="sr-only" for="message">Jawaban Anda</label><textarea id="message" rows="1" maxlength="2000" placeholder="Tulis jawaban Anda…"></textarea><button type="submit" id="send" aria-label="Kirim jawaban ke sesi lokal">↑</button></form>
         <footer class="chat-footer"><span id="privacy-note">Bukti diproses lokal · gambar dihapus setelah OCR</span><button id="reset" class="text-button">Mulai ulang</button></footer>
         <button id="apply-host" class="secondary" hidden>Terapkan ke formulir lokal ↗</button>
       </article>
@@ -35,6 +35,6 @@
     </section>
     <footer class="page-footer"><span>IASC Intake Lab <span class="muted">/</span> Proof of Concept 0.1</span><span>OCR → percakapan → tinjauan manusia</span></footer>
   </main>
-  <dialog id="edit-dialog"><form id="edit-form"><div class="dialog-top"><h2 id="edit-title">Edit isian</h2><button type="button" id="close-edit" aria-label="Tutup dialog">×</button></div><label for="edit-value" id="edit-label"></label><input id="edit-value" maxlength="4000"><label for="edit-category" class="sr-only">Kategori modus</label><select id="edit-category" hidden></select><p id="edit-hint"></p><div class="dialog-actions"><button type="button" id="cancel-edit" class="secondary">Batal</button><button type="submit" class="primary">Simpan koreksi</button></div></form></dialog>
+  <dialog id="edit-dialog"><form id="edit-form"><div class="dialog-top"><h2 id="edit-title">Edit isian</h2><button type="button" id="close-edit" aria-label="Tutup dialog">×</button></div><label for="edit-value" id="edit-label"></label><input id="edit-value" maxlength="2000"><label for="edit-category" class="sr-only">Kategori modus</label><select id="edit-category" hidden></select><p id="edit-hint"></p><div class="dialog-actions"><button type="button" id="cancel-edit" class="secondary">Batal</button><button type="submit" class="primary">Simpan koreksi</button></div></form></dialog>
 </body>
 </html>

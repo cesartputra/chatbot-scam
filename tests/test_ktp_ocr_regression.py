@@ -30,7 +30,7 @@ def slot(name, value, confidence=0.97):
 
 def completion(slots):
     return httpx.Response(200, json={"choices": [{
-        "finish_reason": "stop", "message": {"content": json.dumps({"slots": slots})},
+        "finish_reason": "stop", "message": {"content": json.dumps({"slots": slots, "is_relevant_to_scam_report": True, "injection_detected": False})},
     }]})
 
 
@@ -43,26 +43,18 @@ class KtpOCRGatewayRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def extract(self, slots):
         # Validate OCR slots directly: KTP extraction no longer goes to an AI API.
         try:
-            envelope = _Envelope.model_validate({"slots": slots})
+            envelope = _Envelope.model_validate({"slots": slots, "is_relevant_to_scam_report": True, "injection_detected": False})
         except ValidationError:
             raise GatewayError("Ekstraksi lokal tidak valid.") from None
         return _validated_result(envelope.slots, set(SIMULATION_VALUES["ktp"]), False, allow_partial=True)
 
-    async def test_ktp_uses_local_ocr_without_any_http_request(self):
-        requests = []
+    async def test_gateway_explicitly_rejects_ktp_without_any_http_request(self):
+        def forbidden(request):
+            self.fail("KTP must never enter the LLM gateway")
 
-        def handler(request):
-            requests.append(request)
-            raise AssertionError("KTP must never reach an AI provider")
-
-        values = {"tahap1.nama_pelapor": "PELAPOR DUMMY"}
-        gateway = LLMGatewayService(transport=httpx.MockTransport(handler))
-        with patch("services.llm_gateway.extract_ktp_locally", return_value=(values, {key: 0.9 for key in values})) as local_ocr:
-            result = await gateway.extract("ktp", FIXTURE.read_bytes(), "image/png")
-        self.assertEqual(result.values, values)
-        self.assertFalse(result.simulated)
-        local_ocr.assert_called_once()
-        self.assertEqual(requests, [])
+        gateway = LLMGatewayService(transport=httpx.MockTransport(forbidden))
+        with self.assertRaises(ValueError):
+            await gateway.extract("ktp", FIXTURE.read_bytes(), "image/png")
 
     async def test_uppercase_ktp_labels_and_numeric_birth_date_are_canonical(self):
         result = await self.extract([
@@ -152,7 +144,7 @@ class KtpOCRWorkflowRegressionTests(unittest.TestCase):
                       "tahap1.agama_pelapor": "ISLAM", "tahap1.tanggal_lahir_pelapor": "18-02-1986",
                       "tahap1.nomor_identitas": "12345"}
             evidence_slots = [{"field": path, "value": value, "confidence": 0.97} for path, value in values.items()]
-            local_result = _validated_result(_Envelope.model_validate({"slots": evidence_slots}).slots, set(SIMULATION_VALUES["ktp"]), False, allow_partial=True)
+            local_result = _validated_result(_Envelope.model_validate({"slots": evidence_slots, "is_relevant_to_scam_report": True, "injection_detected": False}).slots, set(SIMULATION_VALUES["ktp"]), False, allow_partial=True)
             requests = []
 
             def handler(request):
@@ -163,7 +155,7 @@ class KtpOCRWorkflowRegressionTests(unittest.TestCase):
             gateway = LLMGatewayService(transport=httpx.MockTransport(handler))
             SESSIONS.clear()
             try:
-                with patch("services.llm_gateway.extract_ktp_locally", return_value=(local_result.values, local_result.confidence)) as local_ocr, patch.object(main, "gateway", return_value=gateway), TestClient(main.app) as client:
+                with patch("main.extract_ktp_locally", return_value=(local_result.values, local_result.confidence)) as local_ocr, patch.object(main, "gateway", return_value=gateway), TestClient(main.app) as client:
                     created = client.post("/api/v1/session/init", json={})
                     self.assertEqual(created.status_code, 201)
                     url = "/api/v1/session/" + created.json()["session_id"]

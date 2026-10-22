@@ -25,12 +25,14 @@ load_dotenv(ROOT / ".env", override=False)
 from app import app  # Reuse the existing replica, assets and legacy draft API.
 from schemas import FileMetadata, LaporanIASC
 from services.image_processor import ImageProcessingError, process_image, smart_file_reuse
-from services.llm_gateway import GatewayError, LLMGatewayService
+from services.ktp_ocr import extract_ktp_locally
+from services.llm_gateway import ExtractionResult, GatewayError, LLMGatewayService
+from services.guardrails import GuardrailViolation, check_user_input
 from services.orchestrator import (
     EVIDENCE_KINDS, IntakeState, SESSIONS, advance, apply_patch, build_report,
     flattened, get_path, invalidate, new_session, rate_limit, session_for,
     set_path, snapshot, stage_errors, sync_derived, UPLOAD_STATES, current_errors,
-    prepare_confirmation, normalize_patch,
+    prepare_confirmation, normalize_patch, guardrail_refusal,
 )
 
 app.title = "IASC Local Replica · Hybrid AI Intake"
@@ -77,7 +79,7 @@ class InputModel(BaseModel):
 
 
 class ChatInput(InputModel):
-    text: str = Field(default="", max_length=8000)
+    text: str = Field(default="", max_length=2000)
     values: dict[str, object] = Field(default_factory=dict, max_length=100)
     confirm: StrictBool = False
     action: str = Field(default="", max_length=40)
@@ -179,12 +181,18 @@ async def upload_evidence(session_id: str, file: UploadFile = File(...)):
         if len(session.files) >= 12:
             await file.close()
             raise HTTPException(413, "Batas 12 unggahan per sesi. Mulai sesi baru untuk bukti tambahan.")
-        llm = gateway()
+        llm = None if kind in {"ktp", "laporan_kepolisian"} else gateway()
         try:
             async with UPLOAD_CONCURRENCY:
                 raw = await file.read(10 * 1024 * 1024 + 1)
                 image = await run_in_threadpool(process_image, raw, file.filename or "bukti", file.content_type or "")
-                result = None if kind == "laporan_kepolisian" else await llm.extract(kind, image.data, image.mime_type)
+                if kind == "ktp":
+                    values, confidence = await run_in_threadpool(extract_ktp_locally, image.data)
+                    result = ExtractionResult(values=values, confidence=confidence, simulated=False)
+                else:
+                    result = None if kind == "laporan_kepolisian" else await llm.extract(kind, image.data, image.mime_type)
+        except GuardrailViolation:
+            return guardrail_refusal(session, simulated=getattr(session, "simulated_extraction", True))
         except (ImageProcessingError, GatewayError) as exc:
             raise HTTPException(422 if isinstance(exc, ImageProcessingError) else 502, str(exc)) from None
         finally:
@@ -224,7 +232,8 @@ async def upload_evidence(session_id: str, file: UploadFile = File(...)):
             candidate.state = IntakeState.TRANSFER_DETAILS
         else:
             candidate.state = IntakeState.ACCOUNT
-        candidate.simulated_extraction = llm.simulated
+        if llm is not None:
+            candidate.simulated_extraction = llm.simulated
         sync_derived(candidate)
         advance(candidate)
         response = view(candidate, before)
@@ -246,18 +255,21 @@ async def chat_v1(session_id: str, body: ChatInput):
     session = session_for(session_id)
     async with session.lock:
         rate_limit(session)
-        candidate = candidate_session(session)
-        before = deepcopy(session.data)
-        advance(candidate)
-        text = body.text.strip()
-        action = body.action or text
-        normalized = action.casefold()
         try:
+            text = check_user_input(body.text, allow_scalar=session.state != IntakeState.CHRONOLOGY) if body.text else ""
+            action = check_user_input(body.action, allow_scalar=True) if body.action else text
+            for path in body.values:
+                check_user_input(path, allow_scalar=True)
+            values = {path: check_user_input(value, allow_scalar=not path.endswith(".kronologi_kejadian_penipuan")) if isinstance(value, str) else value for path, value in body.values.items()}
+            candidate = candidate_session(session)
+            before = deepcopy(session.data)
+            advance(candidate)
+            normalized = action.casefold()
             if body.values:
                 if body.confirm:
                     raise HTTPException(422, "Simpan koreksi terlebih dahulu sebelum konfirmasi.")
                 was_final = candidate.state in {IntakeState.CONFIRM, IntakeState.COMPLETED}
-                apply_patch(candidate, body.values, {}, "manual", manual=True)
+                apply_patch(candidate, values, {}, "manual", manual=True)
                 if was_final:
                     prepare_confirmation(candidate)
             elif candidate.state == IntakeState.STATUS:
@@ -318,8 +330,6 @@ async def chat_v1(session_id: str, body: ChatInput):
             elif current_errors(candidate):
                 item = current_errors(candidate)[0]
                 path = item["path"]
-                if normalized.strip(" .!?") in {"halo", "hai", "hi", "help", "bantuan", "saya bingung", "tidak mengerti", "maksudnya apa"}:
-                    return view(session, before)
                 if action == "confirm_value" and item["reason"] == "low_confidence":
                     apply_patch(candidate, {path: get_path(candidate.data, path)}, {}, "manual", manual=True)
                 else:
@@ -330,6 +340,8 @@ async def chat_v1(session_id: str, body: ChatInput):
                         raise HTTPException(422, "Saya belum menemukan jawaban untuk kolom ini. " + item["question"])
             else:
                 raise HTTPException(409, "Silakan unggah satu dokumen yang sedang diminta melalui tombol lampiran.")
+        except GuardrailViolation:
+            return guardrail_refusal(session, simulated=getattr(session, "simulated_extraction", True))
         except GatewayError as exc:
             raise HTTPException(422, str(exc)) from None
         advance(candidate)

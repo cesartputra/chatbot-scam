@@ -81,6 +81,84 @@ def normalize_media(text: str) -> str | None:
     return _match(text, MEDIA, {"WA": "WhatsApp", "WHATS APP": "WhatsApp", "IG": "Instagram", "WEB": "Website", "SITUS WEB": "Website", "TIK TOK": "TikTok", "E MAIL": "Email", "PANGGILAN TELEPON": "Telepon"})
 
 
+def normalize_report_slot(path: str, value, *, document=False):
+    if path.endswith((".nama_penyelenggara", ".nama_penyelenggara_layanan_korban")):
+        normalized = normalize_bank(value)
+        if normalized is None:
+            raise ValueError("Bank belum dikenali")
+        return normalized
+    if path.endswith(".sumber_media_informasi_penipuan"):
+        normalized = normalize_media(value)
+        if normalized is None:
+            raise ValueError("Media belum dikenali")
+        return normalized
+    if document and path.endswith((".waktu_transaksi", ".tanggal_dan_waktu_kejadian")):
+        return to_indonesian_date(value, with_time=True, seconds=path.endswith(".waktu_transaksi"))
+    return normalize_ktp_slot(path, value) if document else value
+
+
+def is_supported_by_evidence(path: str, value, text: str) -> bool:
+    """Conservative grounding: unsupported facts require a manual answer."""
+    from schemas import validate_slot_value
+
+    if path.endswith(".extraction_confidence"):
+        return True  # Derived server-side from slot confidence, not a reporting fact.
+    if path.endswith(".nominal_transaksi"):
+        if re.search(r"\b(?:USD|EUR|SGD|MYR|AUD|GBP)\b|\$", text, re.I):
+            return False  # The report contract is IDR; currency conversion is not extraction.
+        amounts = re.findall(r"(?:\bRp\.?|\bIDR|nominal(?:_transaksi)?|amount|sebesar)\s*[:=]?\s*([0-9][0-9.,]*)", text, re.I)
+        for raw in amounts:
+            try:
+                raw = raw.rstrip(".,")
+                if re.fullmatch(r"[0-9]{1,3}(?:\.[0-9]{3})+(?:,[0-9]{1,2})?", raw):
+                    raw = raw.replace(".", "").replace(",", ".")
+                elif re.fullmatch(r"[0-9]+,[0-9]{1,2}", raw):
+                    raw = raw.replace(",", ".")
+                if validate_slot_value(path, raw) == value:
+                    return True
+            except (ValueError, TypeError):
+                continue
+        return False
+    if "nomor_rekening" in path or path.endswith((".nomor_terlapor", ".nomor_telepon_pelapor")):
+        date = r"(?:[0-9]{4}[-/.][0-9]{1,2}[-/.][0-9]{1,2}|[0-9]{1,2}[-/.][0-9]{1,2}[-/.][0-9]{4}|[0-9]{1,2}\s+(?:" + "|".join(MONTHS) + r")\s+[0-9]{4})"
+        time = r"[0-9]{1,2}[:.][0-9]{2}(?::[0-9]{2})?(?:Z|[+-][0-9]{2}:?[0-9]{2})?"
+        non_identifiers = (
+            r"(?<![0-9])" + date + r"(?:[ T,]+(?:(?:pukul|jam)\s+)?" + time + r")?(?![0-9])",
+            r"\b(?:Rp\.?|IDR|USD|EUR|SGD|MYR|AUD|GBP|nominal(?:_transaksi)?|amount|sebesar)\s*[:=]?\s*(?:(?:Rp\.?|IDR)\s*)?[0-9][0-9.,]*",
+            r"(?<!\w)[0-9][0-9.,]*\s*(?:IDR|rupiah|USD|EUR|SGD|MYR|AUD|GBP)\b",
+        )
+        numeric = list(text)
+        for pattern in non_identifiers:
+            for match in re.finditer(pattern, text, re.I):
+                # Delimiters stop adjacent digits from swallowing a removed date/amount.
+                numeric[match.start():match.end()] = "#" * len(match[0])
+        candidates = re.findall(r"(?<![\w])[+]?[0-9](?:[ .()-]?[0-9]){5,29}(?![\w])", "".join(numeric))
+        for raw in candidates:
+            digits = re.sub(r"\D", "", raw)
+            if digits == str(value):
+                return True
+            if path.endswith((".nomor_terlapor", ".nomor_telepon_pelapor")):
+                if (digits[2:] if digits.startswith("62") else digits.lstrip("0")) == str(value):
+                    return True
+        return False
+    key = _key(str(value))
+    if key and re.search(r"(?<!\w)" + re.escape(key) + r"(?!\w)", _key(text)):
+        return True
+    if path.endswith((".nama_penyelenggara", ".nama_penyelenggara_layanan_korban", ".sumber_media_informasi_penipuan")):
+        normalizer = normalize_media if path.endswith(".sumber_media_informasi_penipuan") else normalize_bank
+        return any(normalizer(line.partition(":")[2] or line) == value for line in text.splitlines())
+    if path.endswith((".waktu_transaksi", ".tanggal_dan_waktu_kejadian")):
+        for raw in re.findall(r"[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}(?::[0-9]{2})?(?:Z|[+-][0-9]{2}:[0-9]{2})?", text):
+            if path.endswith(".waktu_transaksi") and not re.search(r"[T ][0-9]{2}:[0-9]{2}:[0-9]{2}", raw):
+                continue
+            try:
+                if normalize_report_slot(path, raw, document=True) == value:
+                    return True
+            except ValueError:
+                continue
+    return False
+
+
 def normalize_ktp_slot(path: str, value):
     """Normalize document spelling/format only; never guess identity digits."""
     if not isinstance(value, str):

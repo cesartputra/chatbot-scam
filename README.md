@@ -1,12 +1,12 @@
 # Replika IASC lokal + Help Center OCR & Chat
 
-PoC FastAPI dengan replika lima tahap pelaporan IASC dan chatbot percakapan yang dapat ditempel melalui iframe. **Tidak mengirim laporan resmi, memverifikasi identitas nyata, atau memblokir rekening. Gunakan data dummy.**
+PoC FastAPI dengan replika lima tahap pelaporan IASC dan asisten pengisian bertahap yang dapat ditempel melalui iframe. LLM hanya mengekstrak JSON pelaporan; tidak menyediakan obrolan bebas. **Tidak mengirim laporan resmi, memverifikasi identitas nyata, atau memblokir rekening. Gunakan data dummy.**
 
 UI mengikuti acuan halaman publik dan screenshot IASC yang diperiksa pada 20 Oktober 2026. Kontrak Pydantic lima tahap mengikuti spesifikasi pengguna; **belum diverifikasi terhadap backend resmi ASP.NET IASC**. Target pengisian di bawah 45 detik belum diukur dan bukan jaminan performa.
 
 ## Jalankan
 
-Memerlukan Python 3.11+; diuji pada Python 3.14.4. Node diperlukan untuk tes JavaScript. **Tesseract open source dengan trained data `eng` wajib dipasang pada server untuk OCR KTP**, terlepas dari model vision yang dipilih. Mode simulasi tanpa key memakai data dummy tetap.
+Memerlukan Python 3.11+; diuji pada Python 3.14.4. Node diperlukan untuk tes JavaScript. **Tesseract open source dengan trained data `eng` wajib dipasang pada server**, untuk OCR KTP dan pemeriksaan lokal setiap bukti sebelum vision, termasuk mode simulasi. KTP selalu dibaca lokal; simulasi tanpa key memakai hasil dummy untuk bukti non-KTP yang lolos pemeriksaan.
 
 ```bash
 # macOS
@@ -50,13 +50,13 @@ Chat hanya memiliki satu tombol lampiran, satu input teks, tombol kirim, dan jaw
 
 1. Pilih mengalami sendiri atau mewakili korban. Kirim KTP dummy; biodata mulai masuk ke Tahap 1. Ketik nomor HP dan email dalam satu jawaban, misalnya `08123456789, pelapor.dummy@example.com`.
 2. Kirim bukti komunikasi. Chat melengkapi informasi terlapor/media pada Tahap 2 dan menanyakan informasi yang belum terbaca. Tambahkan bukti chat lain atau lanjut.
-3. Ceritakan kejadian beserta tanggal dan jam sebenarnya. Mode simulasi mempertahankan cerita pengguna; tidak menggantinya dengan cerita dummy. Bila waktu belum disebut, chat menanyakannya. Bukti chat dipakai ulang untuk kejadian. Unggah gambar laporan polisi atau pilih **Lewati / Belum Ada**.
+3. Ceritakan kejadian beserta tanggal dan jam sebenarnya. Cerita dipertahankan dan waktunya diparsing lokal pada semua mode, tanpa penulisan ulang oleh LLM. Bila waktu belum disebut, chat menanyakannya. Bukti chat dipakai ulang untuk kejadian. Unggah gambar laporan polisi atau pilih **Lewati / Belum Ada**.
 4. Kirim bukti kepemilikan rekening, lalu bukti transfer. Bukti transfer berikutnya menambah rincian transaksi pada penerima yang sama atau menambah penerima baru; transaksi sebelumnya dipertahankan.
 5. Periksa kartu ringkasan. Pesan menjelaskan bahwa mengetik jawaban CAPTCHA lokal berarti menyetujui S&K **simulasi lokal**. Jawaban benar menghasilkan tiket `SIM-…` di chat dan host. Tidak ada langkah pengiriman resmi atau tindakan bank.
 
 Setiap respons membawa perubahan field. Replika mengisinya satu per satu dengan jeda **120 ms**, menyorot/menggulir field, mengisi radio/dropdown/tanggal/lampiran serta tabel bersarang, lalu berpindah ke tahap aktif. Isian manual yang sudah ada dipertahankan dan konflik diberitahukan. Sesi baru menghapus isian hasil AI sebelumnya sambil mempertahankan perubahan manual.
 
-Pada Tahap 2, **media** seperti WhatsApp berbeda dari **detail media** berupa nomor kontak, `@username`, atau tautan lengkap pelaku. Nilai eksplisit ini diparsing lokal. Sapaan seperti `halo` mengulang panduan saat ini; ekstraksi AI kosong atau jawaban yang tidak dapat diterapkan menampilkan penjelasan tanpa mengubah draft. Balasan tetap terlihat ketika pertanyaan/revisi sesi belum berubah.
+Pada Tahap 2, **media** seperti WhatsApp berbeda dari **detail media** berupa nomor kontak, `@username`, atau tautan lengkap pelaku. Nilai eksplisit ini diparsing lokal. Sapaan seperti `halo`, pertanyaan umum, dan prompt injection menerima penolakan tetap tanpa API AI atau perubahan draft. Ekstraksi kosong/jawaban yang tidak dapat diterapkan juga menampilkan penjelasan. Balasan tetap terlihat ketika pertanyaan/revisi sesi belum berubah. Maksimal satu pesan adalah **2.000 karakter**.
 
 Formulir manual tetap tersedia bila AI gagal. **Simpan Simulasi Lokal** menyimpan metadata di localStorage browser dengan `SIM-…`, `simulated:true`, `submitted:false`; berkas asli tidak disimpan di sana. Isian aktif/file di memori tab hilang saat halaman dimuat ulang. Metadata tiket dapat dihapus melalui Cek Laporan. Tombol kirim laporan resmi dinonaktifkan.
 
@@ -71,6 +71,7 @@ iasc-ai-intake/
 ├── services/
 │   ├── orchestrator.py            # State, sesi, delta patch, confidence
 │   ├── llm_gateway.py             # Gateway OpenAI-compatible dan simulasi
+│   ├── guardrails.py              # Allowlist tugas, scope, injection, pesan penolakan
 │   ├── ktp_ocr.py                 # OCR dan parser KTP sepenuhnya lokal
 │   ├── privacy.py                 # Pseudonim data pribadi sebelum API teks
 │   ├── image_processor.py         # Validasi/kompresi dan pointer bukti
@@ -91,13 +92,13 @@ iasc-ai-intake/
 └── TEST_RESULTS.md
 ```
 
-`/assistant` dan `/widget` mengarahkan ke demo percakapan baru pada `/Guest/LaporanV2?assistant=1`. UI lama masih tersedia pada `/static/index.html`; `/api/sessions` memakai skema ringkas dan sesi terpisah. Entry point utama adalah **`main:app`**.
+`/assistant` dan `/widget` mengarahkan ke demo percakapan baru pada `/Guest/LaporanV2?assistant=1`. UI lama masih tersedia pada `/static/index.html`; `/api/sessions` memakai skema ringkas dan sesi terpisah. API lama hanya memakai parser lokal; akses cloud lamanya dinonaktifkan agar tidak melewati guardrail v1. Entry point utama adalah **`main:app`**.
 
 ## AI Gateway
 
-Default `AI_MODE=auto` dengan key kosong memakai **ekstraksi dokumen dummy tetap**, bukan membaca isi gambar. Unggahan tetap divalidasi/dikompresi. Nomor/email diambil dari teks yang benar-benar diketik, dan kronologi memakai cerita pengguna. UI/respons menandai mode simulasi.
+Default `AI_MODE=auto` dengan key kosong memakai **ekstraksi bukti non-KTP dummy tetap** setelah pemeriksaan OCR lokal. KTP selalu diekstrak oleh parser lokal. Unggahan tetap divalidasi/dikompresi. Nomor/email diambil dari teks yang benar-benar diketik, dan kronologi memakai cerita pengguna. UI/respons menandai ekstraksi simulasi.
 
-Provider utama chat adalah **Sumopod AI** melalui base URL `https://ai.sumopod.com/v1` dan API key pada server, mengikuti [dokumentasi OpenAI-compatible resmi](https://docs.sumopod.com/guides/ai/openai-compatible-api). Pilih nama model dari dashboard atau `/v1/models` untuk key Anda; akses model dapat berbeda antar akun.
+Provider ekstraksi JSON adalah **Sumopod AI** melalui base URL `https://ai.sumopod.com/v1` dan API key pada server, mengikuti [dokumentasi OpenAI-compatible resmi](https://docs.sumopod.com/guides/ai/openai-compatible-api). Pilih nama model dari dashboard atau `/v1/models` untuk key Anda; akses model dapat berbeda antar akun.
 
 Konfigurasi utama memisahkan KTP lokal, chat Sumopod, dan vision Sumopod untuk bukti lain:
 
@@ -116,17 +117,17 @@ AI_TIMEOUT_SECONDS=60
 
 Key kosong mempertahankan simulasi berlabel; isi key dan restart untuk memakai Sumopod. **Satu API key dapat dipakai untuk chat dan vision** bila key tersebut mengizinkan kedua model. ID model harus persis seperti hasil `/v1/models`, termasuk prefix `gemini/`. Nama tanpa prefix ditolak oleh key pengujian; bukan karena key yang sama dipakai dua model.
 
-Vision Gemini pada gateway ini memakai `AI_RESPONSE_FORMAT=json_object`; schema lengkap dan contoh confidence disertakan dalam prompt. `json_schema` ditolak upstream pada uji nyata. Confidence yang tidak dikembalikan provider menjadi **0**, sehingga wajib dikonfirmasi manusia. Error akses model, nama model, kuota, timeout, dan kontrak respons dibedakan tanpa menampilkan isi respons/key.
+Gateway mengunci `temperature=0` dan `response_format={"type":"json_object"}`; `AI_RESPONSE_FORMAT` tidak dapat melonggarkannya. Schema lengkap dan contoh confidence disertakan dalam prompt. Confidence dokumen yang tidak dikembalikan provider menjadi **0**, sehingga wajib dikonfirmasi manusia. Error akses model, nama model, kuota, timeout, dan kontrak respons dibedakan tanpa menampilkan isi respons/key.
 
 KTP diproses oleh Tesseract dan parser label di server; **gambar maupun teks OCR KTP tidak dikirim ke Sumopod**. Parser menangani label KTP Indonesia, header wilayah, tempat/tanggal lahir, dan alamat. Hasil yang tidak terbaca tetap kosong. Ini ekstraksi data, bukan pemeriksaan keaslian KTP.
 
 Hasil OCR KTP dinormalkan sebelum validasi: kapitalisasi jenis kelamin/agama/identitas, `WNI`, dan format tanggal yang jelas. Kolom yang masih invalid dibiarkan kosong untuk ditanyakan lewat chat; kolom valid serta lampiran tetap disimpan. Digit NIK tidak ditebak, ditambah, atau dikonversi dari angka.
 
-Percakapan memakai pseudonim bertipe, misalnya `[NAMA_PELAPOR_1]`, `[NIK_1]`, `[REKENING_1]`, `[EMAIL_1]`, dan `[TELEPON_1]`. Nilai pribadi yang sudah diketahui dari sesi serta pola pengenal pada pesan disamarkan sebelum API; relasi pelapor/terlapor, jumlah transaksi, dan waktu kejadian dipertahankan. Pemetaan hanya ada di memori selama permintaan dan dipulihkan sebelum validasi/isian formulir. Model tidak mendapat tabel pemetaan. Penanda baru/rusak ditolak; kronologi yang kehilangan penanda juga ditolak. Kontak dan koreksi satu kolom pribadi diparsing lokal tanpa API.
+Teks ekstraksi memakai pseudonim bertipe, misalnya `[NAMA_PELAPOR_1]`, `[NIK_1]`, `[REKENING_1]`, `[EMAIL_1]`, dan `[TELEPON_1]`. Nilai pribadi yang sudah diketahui dari sesi serta pola pengenal pada pesan disamarkan sebelum API; relasi pelapor/terlapor, jumlah transaksi, dan waktu kejadian dipertahankan. Pemetaan hanya ada di memori selama permintaan dan dipulihkan sebelum validasi/isian formulir. Model tidak mendapat tabel pemetaan. Penanda baru/rusak ditolak. Kontak, kronologi, tanggal, nominal eksplisit, dan koreksi satu kolom pribadi diparsing lokal tanpa API.
 
 Masking berbasis konteks dan pola **bukan jaminan anonimisasi menyeluruh**: nama baru huruf kecil tanpa penanda atau konteks bisa tidak dikenali. Tuliskan identitas baru dengan label seperti `nama terlapor:`. Bukti selain KTP dikirim sebagai gambar ke vision; masking teks **tidak menyamarkan piksel gambar**. Gunakan bukti dummy atau gambar yang data sensitifnya sudah disamarkan. Laporan polisi hanya disimpan lokal, tanpa ekstraksi cloud.
 
-`ocr_text` tetap tersedia sebagai pilihan eksplisit untuk bukti non-KTP: Tesseract membaca gambar lalu teksnya dimasking sebelum model chat. KTP selalu memakai parser lokal. OCR berjalan pada thread terpisah; hasil buram/ambigu memerlukan koreksi manusia. Kegagalan OCR atau Sumopod tidak memasukkan data dummy dan tidak mengganti draft yang sudah ada.
+`ocr_text` tetap tersedia sebagai pilihan eksplisit untuk bukti non-KTP: Tesseract membaca gambar lalu teksnya dimasking sebelum model ekstraksi teks. Pada mode `image`, pemeriksaan OCR lokal juga wajib sebelum gambar dikirim. Gambar yang terdeteksi sebagai KTP, mengandung injeksi, tidak relevan, atau tidak terbaca ditolak sebelum API. KTP selalu memakai parser lokal. OCR berjalan pada thread terpisah; hasil buram/ambigu memerlukan koreksi manusia. Kegagalan OCR atau Sumopod tidak memasukkan data dummy dan tidak mengganti draft yang sudah ada.
 
 Contoh on-premise dengan alias model pada satu gateway:
 
@@ -143,6 +144,18 @@ AI_RESPONSE_FORMAT=json_object
 Gateway tetap model-agnostic: kedua model memakai **satu `AI_BASE_URL`**; untuk on-premise, router vLLM/LiteLLM harus menyediakan alias dan kemampuan masing-masing. HTTP tanpa TLS hanya diterima pada localhost. Keyless localhost memerlukan `AI_MODE=remote` eksplisit. Konfigurasi on-premise belum diuji.
 
 Restart setelah mengganti konfigurasi. Model hanya mengekstrak slot; state, consent, validasi, dan tiket dikendalikan server. Key tetap di server dan `.env` tidak masuk Git.
+
+## Guardrail yang dapat diperbarui
+
+Aturan server berada di **`services/guardrails.py`**. `ALLOWED_LLM_TASKS` hanya berisi `extract_report_fields`, `extract_transfer_proof`, `extract_victim_account_proof`, dan `extract_chat_proof`; tugas lain menghasilkan `ValueError`. Tambahkan pola injeksi pada `_INJECTION`, aturan topik pada pemeriksaan scope, dan kasus regresi pada `tests/test_guardrails.py`, lalu jalankan pytest dan restart server. Mengubah system prompt saja tidak mengubah izin server.
+
+Input diperiksa sebelum pemrosesan state: maksimal 2.000 karakter, normalisasi Unicode, pembersihan karakter kontrol, deteksi instruksi/tag role/script, serta penolakan topik di luar pelaporan. Jawaban singkat untuk kolom aktif tetap diperbolehkan melalui parser/validator kolom; jawaban tersebut tidak menjadi obrolan bebas. Input terlalu panjang ditolak validasi HTTP 422. Penolakan kebijakan mempertahankan data, revisi, consent, tiket, dan tahap laporan, tanpa patch baru.
+
+Model menerima sumber di dalam `<untrusted_user_report>` sebagai data pasif. Output wajib memiliki `slots`, `is_relevant_to_scam_report`, dan `injection_detected`; Pydantic memakai `extra="forbid"`. Flag penolakan, field asing/duplikat, teks obrolan, penanda privasi palsu, atau fakta yang tidak didukung sumber akan ditolak. Field yang diizinkan juga dibatasi per tugas, dinormalkan, dan divalidasi terhadap kontrak laporan. Semua pesan asisten berasal dari template Python, termasuk penolakan tetap berikut:
+
+> Maaf, asisten ini hanya memproses data pelaporan penipuan keuangan IASC (kronologi kejadian, data rekening, dan bukti transaksi). Mohon masukkan informasi atau unggah bukti yang berkaitan dengan laporan Anda.
+
+Deteksi pola, identifikasi KTP, dan pencocokan fakta bergantung pada OCR/heuristik: dapat menolak bukti sah dan tidak menjamin semua injeksi tersamarkan terdeteksi. Pencocokan nilai tidak membuktikan pemilik rekening atau keaslian bukti. Hasil tetap perlu ditinjau manusia; model tidak memiliki alat, akses submit, atau kewenangan mengubah state.
 
 ## API v1: percakapan bertahap
 
@@ -226,6 +239,6 @@ Integrasi ASP.NET resmi masih memerlukan kontrak field/master ID, tabel modal, t
 node --test tests/*.test.mjs
 ```
 
-**122 tes Python, 130 subtest, dan 26 tes Node lulus** pada pemeriksaan 22 Oktober 2026. Cakupan meliputi peluncur/dependensi, OCR KTP lokal, masking/pemulihan data pribadi, urutan percakapan, kontak alami, kronologi aktual, bukti tambahan, confidence, koreksi atomik, kepemilikan file, CAPTCHA, integrasi mock, mapping progresif, revisi, dan isian manual. Uji API aplikasi dengan Sumopod nyata berhasil mencapai ringkasan tahap 5 tanpa submit/CAPTCHA. Regresi chat yang tidak merespons pada Tahap 2 diuji melalui API, skrip widget, dan browser dengan sesi dummy. Hasil serta batas pemeriksaan dicatat dalam `TEST_RESULTS.md`; on-premise dan backend ASP.NET resmi belum diuji.
+**149 tes Python, 293 subtest, dan 26 tes Node lulus** pada pemeriksaan 22 Oktober 2026. Cakupan meliputi guardrail tugas/scope/injeksi, schema dan pencocokan fakta, draft yang tetap utuh saat penolakan, OCR KTP lokal, masking/pemulihan data pribadi, urutan percakapan, kontak/kronologi lokal, bukti tambahan, confidence, koreksi atomik, kepemilikan file, CAPTCHA, integrasi mock, serta pengisian progresif. Uji Sumopod nyata dengan guardrail ketat berhasil untuk transfer dummy (6/6 field) dan ekstraksi bank dari teks. Browser penuh belum diulang untuk guardrail ini. Hasil serta riwayat pemeriksaan dicatat dalam `TEST_RESULTS.md`; on-premise dan backend ASP.NET resmi belum diuji.
 
 Referensi: [FastAPI multipart uploads](https://fastapi.tiangolo.com/tutorial/request-files/), [Pydantic validators](https://docs.pydantic.dev/latest/concepts/validators/), [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs). Sumber/hak aset tercatat dalam `static/replica/assets/NOTICE.md`.

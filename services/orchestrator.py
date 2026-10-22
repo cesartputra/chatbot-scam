@@ -18,6 +18,7 @@ from schemas import (
     Tahap4InformasiTransaksi, validate_slot_value,
 )
 from services.normalizer import normalize_bank, normalize_location, normalize_media
+from services.guardrails import REFUSAL_MESSAGE
 
 
 class IntakeState(StrEnum):
@@ -426,8 +427,9 @@ def turn_message(session, missing):
     return messages.get(state, "Silakan lengkapi informasi yang diminta."), [{"label": label, "value": value} for label, value in replies.get(state, [])]
 
 
-def snapshot(session, *, simulated=True, before=None):
-    advance(session)
+def snapshot(session, *, simulated=True, before=None, advance_state=True):
+    if advance_state:
+        advance(session)
     missing = current_errors(session)
     message, replies = turn_message(session, missing)
     if missing and missing[0]["reason"] == "low_confidence":
@@ -448,6 +450,13 @@ def snapshot(session, *, simulated=True, before=None):
         "elapsed_seconds": round(time.monotonic() - session.started, 2), "revision": session.revision,
         "result": session.dispatch,
     }
+
+
+def guardrail_refusal(session, *, simulated=True):
+    """Policy refusals describe the current draft without advancing or mutating it."""
+    response = snapshot(session, simulated=simulated, before=session.data, advance_state=False)
+    response.update(assistant_message=REFUSAL_MESSAGE, reply=REFUSAL_MESSAGE, question=REFUSAL_MESSAGE)
+    return response
 
 
 def build_report(session, consent, captcha_answer):

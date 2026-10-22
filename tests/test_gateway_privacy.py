@@ -1,20 +1,19 @@
 import json
 import os
-import re
 import unittest
 from unittest.mock import patch
 
 import httpx
 
 import app
+from fastapi import HTTPException
 from services.llm_gateway import GatewayError, INCIDENT_SLOT, LLMGatewayService, STORY_SLOT
-from services.privacy import placeholders
 
 
 def completion(slots):
     return httpx.Response(200, json={"choices": [{
         "finish_reason": "stop",
-        "message": {"content": json.dumps({"slots": slots})},
+        "message": {"content": json.dumps({"slots": slots, "is_relevant_to_scam_report": True, "injection_detected": False})},
     }]})
 
 
@@ -46,66 +45,61 @@ class GatewayPrivacyTests(unittest.IsolatedAsyncioTestCase):
             "Pada 19 Oktober 2026 10:00 saya transfer Rp10000000 dari rekening 0000123456 untuk pesanan yang tidak dikirim."
         )
 
-    @staticmethod
-    def masked_story(request):
-        body = json.loads(request.content)
-        content = body["messages"][1]["content"]
-        return body, content, content.partition("\nUntrusted user story: ")[2]
-
-    async def test_chronology_masks_outbound_sensitive_facts_and_restores_exact_story(self):
+    async def test_report_extraction_masks_outbound_sensitive_context(self):
         calls = []
+        bank = "tahap4.nama_penyelenggara_layanan_korban"
 
         def handler(request):
-            body, content, story = self.masked_story(request)
+            body = json.loads(request.content)
+            content = body["messages"][1]["content"]
             outbound = json.dumps(body, ensure_ascii=False)
             for value in self.context.values():
                 self.assertNotIn(value, outbound)
             for kind in ("NAMA_PELAPOR", "NIK", "TELEPON", "EMAIL", "ALAMAT", "TANGGAL_LAHIR", "TEMPAT_LAHIR", "REKENING"):
-                self.assertIn("[" + kind + "_", story)
+                self.assertIn("[" + kind + "_", content)
             self.assertIn("19 Oktober 2026 10:00", content)
-            self.assertIn("Rp10000000", story)
-            self.assertIn("dari rekening", story)
-            self.assertIn("Alamat saya", story)
+            self.assertIn("Rp10000000", content)
+            self.assertIn("<untrusted_user_report>", content)
+            self.assertEqual(body["temperature"], 0)
+            self.assertEqual(body["response_format"], {"type": "json_object"})
             calls.append(request)
-            return completion([
-                {"field": STORY_SLOT, "value": story, "confidence": 1.0},
-                {"field": INCIDENT_SLOT, "value": "19 Oktober 2026 10:00", "confidence": 1.0},
-            ])
+            return completion([{"field": bank, "value": "BNI", "confidence": 1.0}])
 
         gateway = LLMGatewayService(transport=httpx.MockTransport(handler))
-        result = await gateway.synthesize_chronology(self.story, {"values": self.context})
-        self.assertEqual(result.values[STORY_SLOT], self.story)
-        self.assertEqual(result.values[INCIDENT_SLOT], "19 Oktober 2026 10:00")
+        # KTP-labelled text itself is blocked; private session context is masked.
+        report = self.story.replace("NIK 0000000000000000, ", "")
+        result = await gateway.extract_chat(report + " Bank rekening korban adalah BNI.", [bank], {"values": self.context})
+        self.assertEqual(result.values, {bank: "BNI"})
         self.assertFalse(result.simulated)
         self.assertEqual(len(calls), 1)
 
-    async def test_chronology_rejects_missing_or_invented_sensitive_tokens(self):
-        for change in ("missing", "invented"):
-            with self.subTest(change=change):
-                def handler(request):
-                    _, _, story = self.masked_story(request)
-                    if change == "missing":
-                        story = story.replace(sorted(placeholders(story))[0], "korban")
-                    else:
-                        story += " [NIK_999]"
-                    return completion([{"field": STORY_SLOT, "value": story, "confidence": 1.0}])
+    async def test_chronology_keeps_private_story_local_without_cloud_rewriting(self):
+        def forbidden(request):
+            self.fail("Chronology and its private details must stay local")
 
-                gateway = LLMGatewayService(transport=httpx.MockTransport(handler))
-                with self.assertRaises(GatewayError) as error:
-                    await gateway.synthesize_chronology(self.story, self.context)
-                for value in self.context.values():
-                    self.assertNotIn(value, str(error.exception))
+        result = await LLMGatewayService(transport=httpx.MockTransport(forbidden)).synthesize_chronology(self.story, self.context)
+        self.assertEqual(result.values[STORY_SLOT], self.story)
+        self.assertEqual(result.values[INCIDENT_SLOT], "19 Oktober 2026 10:00")
+
+    async def test_provider_invented_sensitive_tokens_are_rejected(self):
+        bank = "tahap4.nama_penyelenggara_layanan_korban"
+        gateway = LLMGatewayService(transport=httpx.MockTransport(lambda request: completion([
+            {"field": bank, "value": "[NIK_999]", "confidence": 1.0},
+        ])))
+        with self.assertRaises(ValueError) as error:
+            await gateway.extract_chat("Saya transfer dari rekening BNI untuk pesanan yang tidak dikirim.", [bank], self.context)
+        for value in self.context.values():
+            self.assertNotIn(value, str(error.exception))
 
     async def test_reserved_token_in_context_is_rejected_before_http_with_safe_error(self):
         def forbidden(request):
             self.fail("Reserved placeholders must fail before any HTTP request")
 
         gateway = LLMGatewayService(transport=httpx.MockTransport(forbidden))
-        with self.assertRaises(GatewayError) as error:
-            await gateway.synthesize_chronology(self.story, {
+        with self.assertRaises(ValueError) as error:
+            await gateway.extract_chat("Saya transfer dari rekening BNI untuk pesanan yang tidak dikirim.", ["tahap4.nama_penyelenggara_layanan_korban"], {
                 **self.context, "tahap1.nama_pelapor": "[NAMA_PELAPOR_1]",
             })
-        self.assertIn("disamarkan", str(error.exception))
         self.assertNotIn("0000000000000000", str(error.exception))
 
     async def test_single_private_corrections_are_validated_without_http(self):
@@ -128,34 +122,11 @@ class GatewayPrivacyTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result.values, {field: expected})
                 self.assertFalse(result.simulated)
 
-    async def test_legacy_gateway_masks_text_and_restores_account_before_draft_validation(self):
-        real_client = httpx.AsyncClient
-        calls = []
-
-        def handler(request):
-            body = json.loads(request.content)
-            content = body["messages"][1]["content"][0]["text"]
-            for value in ("0000123456", "0000000000000000", "081234567890"):
-                self.assertNotIn(value, json.dumps(body))
-            account = re.search(r"rekening (\[[A-Z_]+_[0-9]+\])", content)[1]
-            nik = re.search(r"NIK (\[[A-Z_]+_[0-9]+\])", content)[1]
-            phone = re.search(r"telepon (\[[A-Z_]+_[0-9]+\])", content)[1]
-            calls.append(request)
-            return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps({
-                "rekening_pengirim": account, "pelapor_nik": nik, "pelapor_telepon": phone,
-            })}}]})
-
-        def factory(**kwargs):
-            return real_client(transport=httpx.MockTransport(handler), **kwargs)
-
-        text = (
-            'Current missing fields: ["rekening_pengirim", "pelapor_nik", "pelapor_telepon"]\n'
-            "User answer: rekening 0000123456; NIK 0000000000000000; telepon 081234567890"
-        )
-        with patch.dict(os.environ, {"AI_MODEL": "deepseek-v4-flash"}), patch("app.httpx.AsyncClient", side_effect=factory):
-            result = await app.gateway_extract(text)
-        self.assertEqual(result, {"rekening_pengirim": "0000123456", "pelapor_nik": "0000000000000000", "pelapor_telepon": "081234567890"})
-        self.assertEqual(len(calls), 1)
+    async def test_legacy_gateway_cannot_bypass_strict_llm_policy(self):
+        with patch("httpx.AsyncClient", side_effect=AssertionError("Legacy outbound gateway must stay disabled")):
+            with self.assertRaises(HTTPException) as error:
+                await app.gateway_extract("rekening 0000123456; NIK 0000000000000000")
+        self.assertEqual(error.exception.status_code, 403)
 
     async def test_legacy_private_answers_are_local_even_with_remote_ai_enabled(self):
         from fastapi.testclient import TestClient

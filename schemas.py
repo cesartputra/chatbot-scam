@@ -99,6 +99,20 @@ class ContractModel(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_default=True, str_strip_whitespace=True, allow_inf_nan=False)
 
 
+class LLMExtractionSlot(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+    field: str = Field(min_length=1, max_length=200)
+    value: Annotated[str, Field(max_length=4000)] | int | float | None
+    confidence: float = Field(ge=0, le=1)
+
+
+class LLMExtractionEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    slots: list[LLMExtractionSlot] = Field(max_length=200)
+    is_relevant_to_scam_report: StrictBool
+    injection_detected: StrictBool
+
+
 class FileMetadata(ContractModel):
     file_id: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{16,128}$")]
     filename: Annotated[str, AfterValidator(_filename)]

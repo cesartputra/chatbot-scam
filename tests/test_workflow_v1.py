@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 import main
 from services.llm_gateway import GatewayError, LLMGatewayService
+from services.image_processor import ImageProcessingError
 from services.orchestrator import IntakeState, SESSIONS, SESSION_TTL, MAX_SESSIONS, get_path
 
 PHONE = "tahap1.nomor_telepon_pelapor"
@@ -281,11 +282,18 @@ class WorkflowTests(unittest.TestCase):
         response = self.client.post(self.url + "/upload", files={"file": ("bad.png", b"<script>invalid</script>", "image/png")})
         self.assertEqual(response.status_code, 422)
         self.assert_atomic(before)
-        with patch.object(LLMGatewayService, "extract", new=AsyncMock(side_effect=GatewayError("Gateway unavailable"))):
+        with patch("main.extract_ktp_locally", side_effect=ImageProcessingError("OCR unavailable")):
             response = self.client.post(self.url + "/upload", files=self.file())
-        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.status_code, 422)
         self.assert_atomic(before)
         self.assertEqual(SESSIONS[self.session_id].files, {})
+        self.upload("ktp")
+        self.send("08123456789, pelapor.dummy@example.com")
+        before = deepcopy(self.state)
+        with patch.object(LLMGatewayService, "extract", new=AsyncMock(side_effect=GatewayError("Gateway unavailable"))):
+            response = self.client.post(self.url + "/upload", files=self.file("bukti_chat"))
+        self.assertEqual(response.status_code, 502)
+        self.assert_atomic(before)
 
     def test_evidence_owned_by_session_and_forged_reference_rejected(self):
         self.ready()

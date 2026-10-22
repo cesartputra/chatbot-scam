@@ -6,7 +6,7 @@ Entry point `main:app`, Python 3.14.4 pada macOS. Uji cloud hanya memakai fixtur
 
 | Suite | Hasil |
 | --- | --- |
-| Python: `.venv/bin/python -m pytest -q` | **122 lulus, 130 subtest lulus** |
+| Python: `.venv/bin/python -m pytest -q` | **149 lulus, 293 subtest lulus** |
 | JavaScript: `node --test tests/*.test.mjs` | **26 lulus, 0 gagal** |
 
 Python meliputi:
@@ -24,13 +24,26 @@ Python meliputi:
 - Kepemilikan file per sesi, penolakan metadata palsu, expiry/penghapusan/kapasitas sesi, origin/host, batas permintaan, dan error tanpa echo data pribadi.
 - Jawaban CAPTCHA lokal melalui chat membuat tiket `SIM-…` tanpa akses jaringan; persetujuan eksplisit pada adapter, lima percobaan salah, dan hasil idempoten.
 - Adapter DOM/webhook mock, penolakan endpoint eksternal, e-KYC tiruan opsional, serta regresi API/asisten lama.
-- Gateway HTTP tiruan: schema/JSON object, pemilihan model, field terlarang/duplikat, confidence invalid, refusal/timeout/error. Kegagalan tidak beralih ke dummy.
+- Gateway HTTP tiruan: JSON object dan temperature 0 terkunci, pemilihan model, field terlarang/duplikat, confidence invalid, refusal/timeout/error. Kegagalan tidak beralih ke dummy.
 - Sumopod: URL/Authorization/model/JSON object, ID Gemini lengkap, confidence yang hilang menjadi 0 untuk konfirmasi manusia, serta error model/izin/kuota tanpa membocorkan respons provider.
-- KTP: Tesseract dan parser lokal; gambar maupun OCR KTP tidak memanggil HTTP, pada mode `image` maupun `ocr_text`. Field valid tetap tersimpan bila field lain tidak terbaca; bacaan bertentangan memerlukan konfirmasi.
-- Privasi: nama, NIK, rekening, kontak, alamat, biodata dari konteks, referensi, serta rahasia berlabel dimasking dan dipulihkan lokal. Token asing/rusak/tidak pernah dikirim ditolak; kronologi harus mempertahankan penanda. Nomor di samping tanggal tetap disamarkan dan alamat tidak menelan nominal/waktu kejadian.
+- KTP: Tesseract dan parser lokal; endpoint memanggil OCR langsung tanpa memasuki gateway. Gateway menolak jenis `ktp` pada semua mode serta KTP dummy yang disamarkan sebagai setiap jenis bukti lain. Field valid tetap tersimpan bila field lain tidak terbaca; bacaan bertentangan memerlukan konfirmasi.
+- Privasi: nama, NIK, rekening, kontak, alamat, biodata dari konteks, referensi, serta rahasia berlabel dimasking dan dipulihkan lokal. Token asing/rusak/tidak pernah dikirim ditolak. Kronologi sekarang tetap lokal tanpa penulisan ulang cloud. Nomor di samping tanggal tetap disamarkan dan alamat tidak menelan nominal/waktu kejadian.
 - Koreksi satu kolom pribadi pada API v1 dan API chat lama tetap lokal, termasuk jawaban nama huruf kecil tanpa label.
 
 Node meliputi validasi fase/modal, dokumen perwakilan, parsing nominal dan tanggal, mapping payload lama, shared object URL, serta mapping progresif untuk radio/dropdown/tanggal/file dan koleksi bersarang. Cakupan progresif juga meliputi path/revisi tidak sah, sesi lama, Decimal tanpa kehilangan presisi, konflik manual, reset isian AI saat sesi baru, dan gate hasil simulasi untuk consent/CAPTCHA. Tes tidak menghubungi IASC.
+
+## Strict security dan scope guardrails
+
+- `services/guardrails.py` mengizinkan tepat empat tugas ekstraksi; tugas lain, penggunaan tugas bukti untuk field yang berbeda, forwarding data KTP, dan URL gambar eksternal ditolak sebelum HTTP.
+- Pola injeksi Indonesia/Inggris, tag role, penyamaran Unicode/karakter kontrol, payload kode/script, topik umum, coding, politik, dan chitchat ditolak secara deterministik. Pesan di atas 2.000 karakter ditolak dengan HTTP 422 tanpa API.
+- Penolakan diuji pada beberapa state, termasuk konfirmasi dan selesai, serta pada `values`/`action`, upload, dan API lama: data, revisi, file, consent, tiket, dan state tetap; patch baru kosong. Gateway/API cloud lama dinonaktifkan.
+- Schema Pydantic ketat menolak key asing, teks balasan bebas, JSON berkey duplikat, flag relevansi/injeksi tidak aman, dan output palsu yang tidak didukung sumber. Nomor rekening harus mempertahankan nol awal; angka tanggal/nominal tidak dapat dipakai sebagai rekening. Nominal asing tidak dikonversi dan detik transaksi yang tidak tertulis tidak ditambahkan oleh model.
+- Parsing tanggal/nominal eksplisit tetap lokal, termasuk Decimal besar dengan sen utuh. Kronologi asli dipertahankan lokal; pesan asisten selalu berasal dari template server. Alur progressive-fill tetap tercakup dalam suite penuh.
+- Tesseract nyata memeriksa keempat fixture dummy; KTP dikenali, sedangkan tiga bukti lain lolos pemeriksaan relevansi. Respons vision tiruan kemudian diuji terhadap hasil OCR transfer nyata untuk memastikan fakta yang valid diterima.
+- **Uji Sumopod nyata dengan guardrail baru**: vision `gemini/gemini-3.5-flash-lite` mengekstrak bukti transfer dummy, **6/6 field cocok, 4,7 detik**. Ekstraksi teks `deepseek-v4-flash` mengembalikan bank eksplisit yang benar, **1,6 detik**. Keduanya menerima temperature 0, JSON object, serta flag relevansi/injeksi. Pengukuran sekali, bukan benchmark.
+- Tidak ada data identitas nyata, request submit, jawaban CAPTCHA, atau tindakan bank pada uji cloud ini. Alur browser penuh tidak diulang untuk guardrail; pengujian API/state dan Node mencakup regresinya.
+
+OCR dan pola bersifat heuristik: dapat menolak bukti sah dan tidak membuktikan kekebalan terhadap semua injeksi atau keaslian/pemilik bukti. Masking teks tidak menyamarkan piksel gambar non-KTP. Tinjauan manusia tetap diperlukan.
 
 ## Pemeriksaan browser versi percakapan sebelumnya (20–21 Oktober)
 
@@ -45,13 +58,15 @@ Node meliputi validasi fase/modal, dokumen perwakilan, parsing nominal dan tangg
 
 Satu warning deprecation Starlette/httpx muncul pada pytest; tidak ada tes gagal.
 
-## Regresi chat berhenti pada detail media Tahap 2
+## Regresi chat berhenti pada detail media Tahap 2 (sebelum guardrail ketat)
 
 - Penyebab direproduksi: hasil ekstraksi kosong menghasilkan respons sukses dengan revisi/pertanyaan tetap; widget menyembunyikan balasan sebagai duplikat. Nilai yang dibuang normalizer juga dapat menghasilkan keadaan ini.
 - Server kini memberi penjelasan bila ekstraksi tidak mengisi kolom yang diminta, termasuk normalisasi kosong dan nilai manual yang dilindungi. Draft tetap atomik. Widget selalu menampilkan balasan untuk pesan baru, sedangkan pembacaan ulang status tetap menghindari duplikasi.
 - Pertanyaan membedakan media (WhatsApp, Instagram, dll.) dari detail kontaknya. Nama media, nomor telepon, `@username`, dan URL eksplisit diparsing lokal. Pengulangan nama media tidak dimasukkan sebagai detail. Sapaan `halo` menampilkan panduan tanpa API AI; data yang tidak tersedia tidak ditebak.
 - Lima tes Python baru dan dua tes Node baru mencakup ekstraksi kosong, normalizer yang membuang nilai, perlindungan isian manual, balasan identik berulang, error terlihat, pemulihan status, dan input eksplisit tanpa provider.
 - Browser in-app diuji pada server sementara dengan fixture sesi parsial tahap 2: `whatsapp` → pertanyaan nomor/username/tautan → `whatsapp` lagi → penjelasan terlihat → `halo` → panduan terlihat → nomor dummy → pilihan lanjut Tahap 3. Screenshot disimpan sebagai artefak terpisah. Server/tab pengujian dibersihkan; tidak ada submit, CAPTCHA, atau panggilan Sumopod nyata pada regresi ini.
+
+Setelah guardrail ketat, sapaan `halo` menerima penolakan scope tetap. Parser media/detail dan perbaikan tampilan balasan tetap berlaku; tes diperbarui untuk perilaku baru.
 
 ## Diagnosis instalasi dari clone baru
 
@@ -60,7 +75,7 @@ Satu warning deprecation Starlette/httpx muncul pada pytest; tidak ada tes gagal
 - Tiga tes peluncur memakai proses Python tiruan: instalasi gagal tidak memulai server atau menulis marker, percobaan ulang berhasil, peluncuran berikutnya melewati pip, perubahan requirements memicu instalasi, dan indeks/port kustom tetap berlaku. `bash -n start.sh` lulus.
 - Instalasi nyata dari nol belum berhasil diverifikasi karena koneksi PyPI masih terputus. Server sementara dan direktori pengujian dibersihkan; tidak ada key AI atau data laporan yang dipakai.
 
-## Pemeriksaan API Sumopod nyata
+## Pemeriksaan API Sumopod nyata sebelum guardrail ketat
 
 - Key hanya berada pada `.env` yang diabaikan Git, mode berkas 600. Katalog key saat diagnosis memuat `gemini/gemini-3.5-flash-lite`, `deepseek-v4-flash`, dan `deepseek-flash`.
 - Nama Gemini tanpa prefix ditolak HTTP 403. Dengan prefix benar, respons awal tidak menyertakan confidence per slot. Schema lengkap dan contoh confidence dalam prompt JSON object memperbaikinya. `json_schema` menghasilkan HTTP 400 dari upstream Gemini pada gateway ini.
@@ -69,6 +84,8 @@ Satu warning deprecation Starlette/httpx muncul pada pytest; tidak ada tes gagal
 - Chat `deepseek-v4-flash` memproses narasi dummy yang telah dimasking; nama dan rekening asli dipulihkan di server, kronologi lolos validasi (15,2 detik pada satu percobaan).
 - **Uji API aplikasi melalui ASGI pada 22 Oktober**: status pelapor → OCR KTP lokal → kontak → vision bukti chat → kronologi Sumopod dengan masking → lewati laporan polisi → vision bukti rekening → vision transfer → `FINAL_CONFIRMATION`, wizard tahap 5. `submitted:false`, tanpa request submit atau jawaban CAPTCHA. Tidak memakai respons provider tiruan.
 - Pengujian browser penuh tidak diulang untuk perubahan ini. Target seluruh intake di bawah 45 detik belum diukur.
+
+Hasil di bagian ini merupakan riwayat diagnosis. Kronologi saat ini tidak lagi dikirim ke Sumopod; uji live guardrail terbaru dicatat di atas.
 
 ## Regresi validasi OCR KTP
 

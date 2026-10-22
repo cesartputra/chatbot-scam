@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 import main
 from services.llm_gateway import ExtractionResult, GatewayError, LLMGatewayService
 from services.orchestrator import IntakeState, SESSIONS
+from services.guardrails import REFUSAL_MESSAGE
 
 
 MEDIA = "tahap2.daftar_sumber_media_penipuan.0.sumber_media_informasi_penipuan"
@@ -72,7 +73,7 @@ class ChatProgressTests(unittest.TestCase):
         self.assert_unchanged(state)
         with patch.object(main, "gateway", side_effect=AssertionError("Greetings must not call AI")):
             greeting = self.send("halo")
-        self.assertEqual(greeting["assistant_message"], state["assistant_message"])
+        self.assertEqual(greeting["assistant_message"], REFUSAL_MESSAGE)
         self.assertEqual(greeting["next_slot"], DETAIL)
         completed = self.send("08000000001")
         self.assertEqual(completed["state"], IntakeState.CHAT_MORE)
