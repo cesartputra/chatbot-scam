@@ -107,6 +107,23 @@ class NaturalGatewayTests(unittest.IsolatedAsyncioTestCase):
         result = await gateway.extract_chat("2026-10-19 10:00", [INCIDENT_SLOT], {})
         self.assertEqual(result.values[INCIDENT_SLOT], "19 Oktober 2026 10:00")
 
+    async def test_short_natural_bank_and_media_answers_stay_local(self):
+        def forbidden(request):
+            self.fail("Explicit dropdown answers do not need external AI")
+
+        with patch.dict(os.environ, {"AI_MODE": "remote"}):
+            gateway = LLMGatewayService(transport=httpx.MockTransport(forbidden))
+            media = "tahap2.daftar_sumber_media_penipuan.0.sumber_media_informasi_penipuan"
+            bank = "tahap4.nama_penyelenggara_layanan_korban"
+            for path, text, expected in (
+                (media, "lewat WA", "WhatsApp"), (media, "via WhatsApp.", "WhatsApp"),
+                (media, "saya pakai Instagram", "Instagram"),
+                (bank, "rekening saya BCA", "BCA"), (bank, "dari rekening BNI", "BNI"),
+                (bank, "BANK CENTRAL ASIA", "BCA"),
+            ):
+                with self.subTest(text=text):
+                    self.assertEqual((await gateway.extract_chat(text, [path], {})).values, {path: expected})
+
 
 if __name__ == "__main__":
     unittest.main()

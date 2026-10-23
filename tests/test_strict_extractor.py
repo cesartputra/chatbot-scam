@@ -13,7 +13,7 @@ import httpx
 from services.guardrails import GuardrailViolation
 from services.image_processor import process_image
 from services.llm_gateway import GatewayError, LLMGatewayService, SIMULATION_VALUES
-from services.normalizer import is_supported_by_evidence
+from services.normalizer import is_supported_by_evidence, normalize_report_slot
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -110,14 +110,70 @@ class StrictExtractorTests(unittest.IsolatedAsyncioTestCase):
             ("19102026", "Bukti transaksi pada 19-10-2026"),
             ("20261019", "Bukti transaksi pada 2026-10-19"),
             ("202610", "Bukti transaksi pada 19 Oktober 2026 10:00"),
+            ("202610", "Bukti transaksi pada 19 Okt 2026 10:00"),
             ("100000", "Bukti transaksi nominal Rp 100000"),
             ("10000000", "Bukti transaksi nominal 100000.00"),
+            ("000000", "NOMINAL IDR 1 000 000"),
         ):
             with self.subTest(value=value, text=text):
                 self.assertFalse(is_supported_by_evidence(ACCOUNT, value, text))
         self.assertTrue(is_supported_by_evidence(ACCOUNT, "0000000001", "rekening 0000000001 2026-10-19 10:00 nominal Rp100000"))
         self.assertTrue(is_supported_by_evidence(ACCOUNT, "0000000001", "0000000001\nnominal Rp100000"))
         self.assertTrue(is_supported_by_evidence("tahap2.daftar_informasi_terlapor.0.nomor_terlapor", "8120000001", "nomor 0812 0000 001 19.10.2026"))
+
+    async def test_common_receipt_layouts_normalize_only_explicit_money_and_time(self):
+        prefix = "tahap4.daftar_penyelenggara_terlapor.0.daftar_rincian_transaksi.0."
+        amount = prefix + "nominal_transaksi"
+        for raw in ("IDR 320,000.00", "Rp320.000,00", "Rp 320 000", "320 000,00"):
+            with self.subTest(raw=raw):
+                normalized = normalize_report_slot(amount, raw, document=True)
+                self.assertEqual(Decimal(normalized), Decimal("320000"))
+                self.assertTrue(is_supported_by_evidence(amount, Decimal("320000"), "NOMINAL\n" + raw + (" IDR" if not raw.startswith(("IDR", "Rp")) else "")))
+        date = prefix + "waktu_transaksi"
+        for raw in ("19/10/2026 10:00:12", "19-10-2026 10:00:12", "19.10.2026 10:00:12", "19 Okt 2026 10:00:12", "19 Oct 2026 10:00:12"):
+            with self.subTest(raw=raw):
+                normalized = normalize_report_slot(date, raw, document=True)
+                self.assertEqual(normalized, "19 Oktober 2026 10:00:12")
+                self.assertTrue(is_supported_by_evidence(date, normalized, "Waktu transaksi: " + raw))
+        for raw in ("19/10/2026", "19/10/2026 10:00", "19 Okt 2026 10:00", "2026-10-19T10:00"):
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                normalize_report_slot(date, raw, document=True)
+        for raw in ("USD 320,000.00", "1,23,456", "320 00"):
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                normalize_report_slot(amount, raw, document=True)
+
+    async def test_chat_screenshot_without_reporting_keywords_reaches_typed_vision_task(self):
+        image = process_image((ROOT / "fixtures/v1/bukti_chat.png").read_bytes(), "chat.png", "image/png")
+        text = "Barantum Mas\n8% totalnya Rp320.000 mas\nNOMINAL\nIDR 320,000.00\n11 Jan 2024 14:26"
+        name = "tahap2.daftar_informasi_terlapor.0.nama_terlapor"
+        calls = []
+
+        def handler(request):
+            calls.append(json.loads(request.content))
+            return completion(payload([{"field": name, "value": "Barantum Mas", "confidence": 0.9}]))
+
+        with patch("services.llm_gateway.local_ocr_text", return_value=text):
+            result = await LLMGatewayService(transport=httpx.MockTransport(handler)).extract("bukti_chat", image.data, image.mime_type)
+        self.assertEqual(result.values, {name: "Barantum Mas"})
+        self.assertEqual(len(calls), 1)
+        self.assertIn("Authorized task: extract_chat_proof", calls[0]["messages"][0]["content"])
+
+    async def test_partial_image_extraction_keeps_grounded_fields_without_invented_values(self):
+        image = process_image((ROOT / "fixtures/v1/bukti_transfer.png").read_bytes(), "bukti.png", "image/png")
+        bank = "tahap4.daftar_penyelenggara_terlapor.0.nama_penyelenggara"
+        text = "BCA\n0000000001\nNOMINAL IDR 320,000.00\n19/10/2026 10:00:12"
+        prefix = "tahap4.daftar_penyelenggara_terlapor.0.daftar_rincian_transaksi.0."
+        slots = [
+            {"field": bank, "value": "BCA", "confidence": 0.99},
+            {"field": ACCOUNT, "value": "0000000999", "confidence": 0.99},
+            {"field": prefix + "nominal_transaksi", "value": "IDR 320,000.00", "confidence": 0.95},
+            {"field": prefix + "waktu_transaksi", "value": "19/10/2026 10:00:12", "confidence": 0.9},
+        ]
+        with patch("services.llm_gateway.local_ocr_text", return_value=text):
+            result = await LLMGatewayService(transport=httpx.MockTransport(lambda request: completion(payload(slots)))).extract("bukti_transfer", image.data, image.mime_type)
+        self.assertEqual(result.values, {bank: "BCA", prefix + "nominal_transaksi": Decimal("320000.00"), prefix + "waktu_transaksi": "19 Oktober 2026 10:00:12"})
+        self.assertNotIn(ACCOUNT, result.confidence)
+        self.assertEqual(result.values.keys(), result.confidence.keys())
 
     @unittest.skipUnless(shutil.which("tesseract"), "Tesseract not installed")
     async def test_real_dummy_ktp_mislabeled_as_other_evidence_never_leaves_server(self):
@@ -140,7 +196,7 @@ class StrictExtractorTests(unittest.IsolatedAsyncioTestCase):
 
         def handler(request):
             body = json.loads(request.content)
-            self.assertEqual(body["temperature"], 0)
+            self.assertEqual(body["temperature"], 0.3)
             self.assertEqual(body["response_format"], {"type": "json_object"})
             self.assertIn("<untrusted_user_report>", body["messages"][1]["content"][0]["text"])
             calls.append(request)

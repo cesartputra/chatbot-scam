@@ -1,7 +1,7 @@
 """Conservative normalization against the same dropdown values as the local replica."""
 
 import ast
-from datetime import date
+from datetime import date, datetime
 from difflib import SequenceMatcher
 from pathlib import Path
 import re
@@ -81,6 +81,41 @@ def normalize_media(text: str) -> str | None:
     return _match(text, MEDIA, {"WA": "WhatsApp", "WHATS APP": "WhatsApp", "IG": "Instagram", "WEB": "Website", "SITUS WEB": "Website", "TIK TOK": "TikTok", "E MAIL": "Email", "PANGGILAN TELEPON": "Telepon"})
 
 
+def _document_amount(value):
+    if not isinstance(value, str):
+        return value
+    value = re.sub(r"^(?:Rp\.?|IDR)\s*", "", value.strip(), flags=re.I)
+    value = re.sub(r"[.,]-$", "", value)
+    if re.fullmatch(r"[0-9]{1,3}(?:[ \t\u00a0][0-9]{3})+(?:[.,][0-9]{1,2})?", value):
+        value = re.sub(r"[ \t\u00a0]", "", value)
+    if re.fullmatch(r"[0-9]{1,3}(?:\.[0-9]{3})+(?:,[0-9]{1,2})?", value):
+        return value.replace(".", "").replace(",", ".")
+    if re.fullmatch(r"[0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]{1,2})?", value):
+        return value.replace(",", "")
+    if re.fullmatch(r"[0-9]+(?:[.,][0-9]{1,2})?", value):
+        return value.replace(",", ".")
+    raise ValueError("Nominal pada bukti belum terbaca jelas")
+
+
+def _document_time(value: str, *, seconds: bool) -> str:
+    if not isinstance(value, str) or (seconds and not re.search(r"[0-9]{1,2}[:.][0-9]{2}:[0-9]{2}", value)):
+        raise ValueError("Komponen waktu pada bukti harus tertulis lengkap")
+    numeric = re.fullmatch(r"([0-9]{1,2})([-/.])([0-9]{1,2})\2([0-9]{4})[, ]+(?:(?:pukul|jam)\s+)?([0-9]{1,2})[:.]([0-9]{2})(?::([0-9]{2}))?", value.strip(), re.I)
+    named = re.fullmatch(r"([0-9]{1,2})\s+([A-Za-z]+)\.?\s+([0-9]{4})[, ]+(?:(?:pukul|jam)\s+)?([0-9]{1,2})[:.]([0-9]{2})(?::([0-9]{2}))?", value.strip(), re.I)
+    if numeric:
+        day, _, month, year, hour, minute, second = numeric.groups()
+        value = datetime(int(year), int(month), int(day), int(hour), int(minute), int(second or 0))
+    elif named:
+        day, month, year, hour, minute, second = named.groups()
+        months = {name.casefold(): index for index, name in enumerate(MONTHS, 1)}
+        months.update({name[:3].casefold(): index for index, name in enumerate(MONTHS, 1)})
+        months.update({"aug": 8, "oct": 10, "dec": 12, "may": 5})
+        if month.casefold() not in months:
+            raise ValueError("Bulan pada bukti belum dikenali")
+        value = datetime(int(year), months[month.casefold()], int(day), int(hour), int(minute), int(second or 0))
+    return to_indonesian_date(value, with_time=True, seconds=seconds)
+
+
 def normalize_report_slot(path: str, value, *, document=False):
     if path.endswith((".nama_penyelenggara", ".nama_penyelenggara_layanan_korban")):
         normalized = normalize_bank(value)
@@ -93,7 +128,9 @@ def normalize_report_slot(path: str, value, *, document=False):
             raise ValueError("Media belum dikenali")
         return normalized
     if document and path.endswith((".waktu_transaksi", ".tanggal_dan_waktu_kejadian")):
-        return to_indonesian_date(value, with_time=True, seconds=path.endswith(".waktu_transaksi"))
+        return _document_time(value, seconds=path.endswith(".waktu_transaksi"))
+    if document and path.endswith(".nominal_transaksi"):
+        return _document_amount(value)
     return normalize_ktp_slot(path, value) if document else value
 
 
@@ -106,26 +143,24 @@ def is_supported_by_evidence(path: str, value, text: str) -> bool:
     if path.endswith(".nominal_transaksi"):
         if re.search(r"\b(?:USD|EUR|SGD|MYR|AUD|GBP)\b|\$", text, re.I):
             return False  # The report contract is IDR; currency conversion is not extraction.
-        amounts = re.findall(r"(?:\bRp\.?|\bIDR|nominal(?:_transaksi)?|amount|sebesar)\s*[:=]?\s*([0-9][0-9.,]*)", text, re.I)
+        number = r"[0-9]+(?:[., \t\u00a0][0-9]+)*(?:[.,]-)?"
+        amounts = re.findall(r"(?:\bRp\.?|\bIDR|nominal(?:_transaksi)?|amount|sebesar|total\s+transfer|jumlah)\s*[:=]?\s*(?:(?:Rp\.?|IDR)\s*)?(" + number + r")", text, re.I)
+        amounts += re.findall(r"(?<![\w.,])(" + number + r")\s*(?:IDR|rupiah)\b", text, re.I)
         for raw in amounts:
             try:
-                raw = raw.rstrip(".,")
-                if re.fullmatch(r"[0-9]{1,3}(?:\.[0-9]{3})+(?:,[0-9]{1,2})?", raw):
-                    raw = raw.replace(".", "").replace(",", ".")
-                elif re.fullmatch(r"[0-9]+,[0-9]{1,2}", raw):
-                    raw = raw.replace(",", ".")
-                if validate_slot_value(path, raw) == value:
+                if validate_slot_value(path, _document_amount(raw.rstrip(".,"))) == value:
                     return True
             except (ValueError, TypeError):
                 continue
         return False
     if "nomor_rekening" in path or path.endswith((".nomor_terlapor", ".nomor_telepon_pelapor")):
-        date = r"(?:[0-9]{4}[-/.][0-9]{1,2}[-/.][0-9]{1,2}|[0-9]{1,2}[-/.][0-9]{1,2}[-/.][0-9]{4}|[0-9]{1,2}\s+(?:" + "|".join(MONTHS) + r")\s+[0-9]{4})"
+        date = r"(?:[0-9]{4}[-/.][0-9]{1,2}[-/.][0-9]{1,2}|[0-9]{1,2}[-/.][0-9]{1,2}[-/.][0-9]{4}|[0-9]{1,2}\s+[A-Za-z]{3,12}\.?\s+[0-9]{4})"
         time = r"[0-9]{1,2}[:.][0-9]{2}(?::[0-9]{2})?(?:Z|[+-][0-9]{2}:?[0-9]{2})?"
+        amount = r"[0-9]+(?:[., \t\u00a0][0-9]+)*(?:[.,]-)?"
         non_identifiers = (
             r"(?<![0-9])" + date + r"(?:[ T,]+(?:(?:pukul|jam)\s+)?" + time + r")?(?![0-9])",
-            r"\b(?:Rp\.?|IDR|USD|EUR|SGD|MYR|AUD|GBP|nominal(?:_transaksi)?|amount|sebesar)\s*[:=]?\s*(?:(?:Rp\.?|IDR)\s*)?[0-9][0-9.,]*",
-            r"(?<!\w)[0-9][0-9.,]*\s*(?:IDR|rupiah|USD|EUR|SGD|MYR|AUD|GBP)\b",
+            r"\b(?:Rp\.?|IDR|USD|EUR|SGD|MYR|AUD|GBP|nominal(?:_transaksi)?|amount|sebesar|total\s+transfer|jumlah)\s*[:=]?\s*(?:(?:Rp\.?|IDR)\s*)?" + amount,
+            r"(?<!\w)" + amount + r"\s*(?:IDR|rupiah|USD|EUR|SGD|MYR|AUD|GBP)\b",
         )
         numeric = list(text)
         for pattern in non_identifiers:
@@ -148,9 +183,8 @@ def is_supported_by_evidence(path: str, value, text: str) -> bool:
         normalizer = normalize_media if path.endswith(".sumber_media_informasi_penipuan") else normalize_bank
         return any(normalizer(line.partition(":")[2] or line) == value for line in text.splitlines())
     if path.endswith((".waktu_transaksi", ".tanggal_dan_waktu_kejadian")):
-        for raw in re.findall(r"[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}(?::[0-9]{2})?(?:Z|[+-][0-9]{2}:[0-9]{2})?", text):
-            if path.endswith(".waktu_transaksi") and not re.search(r"[T ][0-9]{2}:[0-9]{2}:[0-9]{2}", raw):
-                continue
+        timestamp = r"(?:[0-9]{4}-[0-9]{2}-[0-9]{2}[T ]|[0-9]{1,2}[-/.][0-9]{1,2}[-/.][0-9]{4}[, ]+|[0-9]{1,2}\s+[A-Za-z]+\.?\s+[0-9]{4}[, ]+)(?:(?:pukul|jam)\s+)?[0-9]{1,2}[:.][0-9]{2}(?::[0-9]{2})?(?:Z|[+-][0-9]{2}:[0-9]{2})?"
+        for raw in re.findall(timestamp, text, re.I):
             try:
                 if normalize_report_slot(path, raw, document=True) == value:
                     return True

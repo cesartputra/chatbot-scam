@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
+import {File} from 'node:buffer';
 
 const html = readFileSync(new URL('../widget/iasc-ai-widget.html',import.meta.url),'utf8');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
@@ -11,7 +12,7 @@ const snapshot = {
   assistant_message:'Ketik nomor WhatsApp atau tautan akun pelaku.',
 };
 
-function widget(chatResponse = () => ({status:200,data:snapshot})) {
+function widget(chatResponse = () => ({status:200,data:snapshot}), initialSnapshot = snapshot) {
   const nodes = new Map();
   class Node {
     constructor(tag = 'div') { this.tag = tag; this.children = []; this.listeners = {}; this.disabled = false; this.value = ''; this.className = ''; this.text = ''; this.classList = {add:name => {this.className += ' ' + name;}}; }
@@ -31,7 +32,7 @@ function widget(chatResponse = () => ({status:200,data:snapshot})) {
   const calls = [];
   const fetch = async (path,options) => {
     calls.push({path,options});
-    const result = path.endsWith('/chat') ? chatResponse(JSON.parse(options.body)) : {status:200,data:snapshot};
+    const result = path.endsWith('/chat') ? chatResponse(JSON.parse(options.body)) : {status:200,data:initialSnapshot};
     return {status:result.status,ok:result.status < 400,json:async () => structuredClone(result.data)};
   };
   runInNewContext(script,{document,window,location:{search:'?embed=1',origin:'http://127.0.0.1:8787',protocol:'http:'},URL,URLSearchParams,FormData,AbortController,setTimeout,clearTimeout,fetch});
@@ -68,4 +69,18 @@ test('validation errors remain visible and the status recovery does not duplicat
   const assistantCount = chat.messages().filter(node => node.className.includes('message assistant')).length;
   chat.nodes.get('recover-status').listeners.click(); await chat.ready();
   assert.equal(chat.messages().filter(node => node.className.includes('message assistant')).length,assistantCount);
+});
+
+test('each repeated refused upload still shows the assistant guidance and restores the controls',async () => {
+  const refused = {...snapshot,state:'CHAT_EVIDENCE_UPLOAD',expected_upload_type:'bukti_chat',assistant_message:'Bukti belum dapat diproses. Silakan kirim screenshot bukti chat.'};
+  const chat = widget(undefined,refused); await chat.ready();
+  for (let index = 0; index < 2; index++) {
+    chat.nodes.get('file-input').files = [new File(['dummy image'],'bukti-dummy.png',{type:'image/png'})];
+    await chat.nodes.get('file-input').listeners.change(); await chat.ready();
+  }
+  assert.equal(chat.calls.filter(call => call.path.endsWith('/upload')).length,2);
+  assert.equal(chat.messages().filter(node => node.className.includes('message assistant')).length,3);
+  assert.equal(chat.messages().filter(node => node.className.includes('message user')).length,2);
+  assert.equal(chat.nodes.get('attach').disabled,false);
+  assert.equal(chat.nodes.get('chat-input').disabled,false);
 });

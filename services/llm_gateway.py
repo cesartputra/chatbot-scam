@@ -20,7 +20,7 @@ from services.normalizer import normalize_report_slot, normalize_media, normaliz
 from services.privacy import PrivacyError, PrivacyMasker, sensitive_kind
 from services.guardrails import (
     ALLOWED_LLM_TASKS, GuardrailViolation, REFUSAL_MESSAGE, check_user_input,
-    detect_prompt_injection, is_within_reporting_scope, looks_like_ktp, require_allowed_task,
+    detect_prompt_injection, looks_like_ktp, require_allowed_task,
     require_reporting_text, is_clearly_out_of_scope,
 )
 
@@ -229,10 +229,13 @@ class LLMGatewayService:
         allowed = set(SIMULATION_VALUES[kind])
         task = PROOF_TASKS[kind]
         if self.simulated:
-            await self._inspect_image(image_bytes)
+            if not await self._inspect_image(image_bytes):
+                return ExtractionResult(simulated=True)
             return _validated_result([_Slot(field=key, value=value, confidence=0.98) for key, value in SIMULATION_VALUES[kind].items()], allowed, True)
         if self.vision_input_mode == "ocr_text":
             text = await self._inspect_image(image_bytes)
+            if not text:
+                return ExtractionResult(simulated=False)
             return await self._remote(self.chat_model, text, allowed, task=task, allow_partial=True)
         content = [
             {"type": "text", "text": "Extract only visible reporting facts from evidence kind " + kind + ". Omit invisible fields; do not infer identity ownership, consent or verification."},
@@ -243,13 +246,14 @@ class LLMGatewayService:
     async def _inspect_image(self, image_bytes: bytes) -> str:
         try:
             text = await asyncio.to_thread(local_ocr_text, image_bytes)
-        except ImageProcessingError as exc:
-            raise GatewayError(str(exc)) from None
-        if not text.strip() or looks_like_ktp(text) or detect_prompt_injection(text) or is_clearly_out_of_scope(text):
+        except ImageProcessingError:
+            # Keep unreadable evidence locally for manual intake; never forward an unclassified image.
+            return ""
+        if not text.strip():
+            return ""
+        if looks_like_ktp(text) or detect_prompt_injection(text) or is_clearly_out_of_scope(text):
             raise GuardrailViolation(REFUSAL_MESSAGE)
-        # Images are preflighted locally; uncertainty must never leak a KTP to cloud.
-        if not is_within_reporting_scope(text[:2000]):
-            raise GuardrailViolation(REFUSAL_MESSAGE)
+        # The requested document kind supplies context; screenshots need not contain reporting keywords.
         return text
 
     async def extract_chat(self, text: str, allowed_slots: list[str], context: dict) -> ExtractionResult:
@@ -266,10 +270,15 @@ class LLMGatewayService:
         if len(allowed) == 1:
             path = allowed_slots[0]
             value = None
+            choice_text = re.sub(
+                r"^(?:(?:saya\s+)?(?:pakai|menggunakan|lewat|melalui|via|dari)\s+|"
+                r"(?:bank|rekening|media)(?:\s+(?:saya|korban|penipuan))?\s*(?:adalah|:|=)?\s+)+",
+                "", text, flags=re.I,
+            ).rstrip(" .")
             if path.endswith(".sumber_media_informasi_penipuan"):
-                value = normalize_media(text)
+                value = normalize_media(text) or normalize_media(choice_text)
             elif path.endswith((".nama_penyelenggara", ".nama_penyelenggara_layanan_korban")):
-                value = normalize_bank(text)
+                value = normalize_bank(text) or normalize_bank(choice_text)
             elif path.endswith(".detail_sumber_media_informasi_penipuan"):
                 if normalize_media(text):
                     raise GatewayError("Nama media sudah tercatat. Untuk detailnya, ketik nomor kontak pelaku, username seperti @akun_contoh, atau tautan lengkap seperti https://example.com.")
@@ -317,7 +326,7 @@ class LLMGatewayService:
         """Keep the person's story; a missing incident timestamp stays missing."""
         from schemas import validate_slot_value
 
-        text = require_reporting_text(text)
+        text = check_user_input(text, allow_report_context=True)
         narrative = " ".join(text.split())
         observed = _explicit_incident_times(text)
         visible = context.get("values", context)
@@ -401,8 +410,10 @@ class LLMGatewayService:
                 evidence = require_reporting_text(content)
             else:
                 evidence = content
-                if looks_like_ktp(evidence) or detect_prompt_injection(evidence) or is_clearly_out_of_scope(evidence) or not is_within_reporting_scope(evidence[:2000]):
+                if looks_like_ktp(evidence) or detect_prompt_injection(evidence) or is_clearly_out_of_scope(evidence):
                     raise GuardrailViolation(REFUSAL_MESSAGE)
+                if not evidence.strip():
+                    return ExtractionResult(simulated=self.simulated)
         elif isinstance(content, list) and task != "extract_report_fields":
             for item in content:
                 if not isinstance(item, dict):
@@ -432,6 +443,8 @@ class LLMGatewayService:
             if len(images) != 1:
                 raise GuardrailViolation(REFUSAL_MESSAGE)
             evidence = await self._inspect_image(images[0][1])
+            if not evidence:
+                return ExtractionResult(simulated=self.simulated)
         else:
             raise GuardrailViolation(REFUSAL_MESSAGE)
         try:
@@ -466,7 +479,7 @@ class LLMGatewayService:
             async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport, trust_env=False, follow_redirects=False) as client:
                 response = await client.post(self.base_url + "/chat/completions", headers=headers, json={
                     "model": model, "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": content}],
-                    "response_format": {"type": "json_object"}, "temperature": 0, "max_tokens": 5000,
+                    "response_format": {"type": "json_object"}, "temperature": 0.3, "max_tokens": 5000,
                 })
             response.raise_for_status()
             if len(response.content) > 256_000:
@@ -488,8 +501,12 @@ class LLMGatewayService:
                 if isinstance(slot.value, str) and (detect_prompt_injection(slot.value) or is_clearly_out_of_scope(slot.value)):
                     raise GuardrailViolation(REFUSAL_MESSAGE)
             result = _validated_result(envelope.slots, allowed, False, allow_partial=allow_partial)
-            if any(not is_supported_by_evidence(path, value, evidence) for path, value in result.values.items()):
+            unsupported = {path for path, value in result.values.items() if not is_supported_by_evidence(path, value, evidence)}
+            if unsupported and not allow_partial:
                 raise GuardrailViolation(REFUSAL_MESSAGE)
+            for path in unsupported:
+                result.values.pop(path)
+                result.confidence.pop(path)
             return result
         except httpx.TimeoutException:
             raise GatewayError("Layanan AI melewati batas waktu. Data tidak diganti dengan data simulasi; coba lagi atau isi manual.") from None

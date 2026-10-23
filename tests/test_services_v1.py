@@ -125,7 +125,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             requests.append(body)
             self.assertEqual(request.url.path, "/v1/chat/completions")
             self.assertEqual(body["response_format"], {"type": "json_object"})
-            self.assertEqual(body["temperature"], 0)
+            self.assertEqual(body["temperature"], 0.3)
             self.assertIn("<untrusted_user_report>", body["messages"][1]["content"][0]["text"])
             return completion([{"field": slot, "value": "BCA", "confidence": 0.9}])
 
@@ -155,7 +155,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             requests.append(body)
             self.assertEqual(body["model"], "chat-test")
             self.assertEqual(body["response_format"], {"type": "json_object"})
-            self.assertEqual(body["temperature"], 0)
+            self.assertEqual(body["temperature"], 0.3)
             self.assertIn("<untrusted_user_report>", body["messages"][1]["content"])
             self.assertNotIn("secret", body["messages"][1]["content"])
             self.assertNotIn("PELAPOR DUMMY", body["messages"][1]["content"])
@@ -207,7 +207,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         gateway = LLMGatewayService(transport=httpx.MockTransport(handler))
         self.assertFalse(gateway.simulated)
         await gateway.extract("bukti_transfer", image_bytes(), "image/png")
-        await gateway.extract_chat("Bank saya BNI", ["tahap4.nama_penyelenggara_layanan_korban"], {})
+        await gateway.extract_chat("Saya melaporkan penipuan. Bank rekening korban BNI.", ["tahap4.nama_penyelenggara_layanan_korban"], {})
         self.assertIsInstance(calls[0], list)
         self.assertIsInstance(calls[1], str)
 
@@ -231,12 +231,16 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.values[slot], "Budi Santoso")
 
     async def test_empty_or_failed_local_ocr_never_calls_provider_or_invents_data(self):
-        os.environ.update(AI_MODE="remote", VISION_INPUT_MODE="ocr_text")
+        os.environ.update(AI_MODE="remote")
         def forbidden(request):
             self.fail("OCR failure must stop before the provider")
-        for value, error in [("", None), (None, ImageProcessingError("OCR belum berhasil"))]:
-            with self.subTest(value=value), patch("services.llm_gateway.local_ocr_text", return_value=value, side_effect=error), self.assertRaises(ValueError):
-                await LLMGatewayService(transport=httpx.MockTransport(forbidden)).extract("bukti_chat", image_bytes(), "image/png")
+        for mode in ("image", "ocr_text"):
+            for value, error in [("", None), (" \n\t", None), (None, ImageProcessingError("Tesseract belum terpasang"))]:
+                with self.subTest(mode=mode,value=value), patch.dict(os.environ, {"VISION_INPUT_MODE":mode}), patch("services.llm_gateway.local_ocr_text", return_value=value, side_effect=error):
+                    result = await LLMGatewayService(transport=httpx.MockTransport(forbidden)).extract("bukti_chat", image_bytes(), "image/png")
+                self.assertEqual(result.values, {})
+                self.assertEqual(result.confidence, {})
+                self.assertFalse(result.simulated)
 
     async def test_provider_cannot_change_action_fields_or_confidence(self):
         os.environ["AI_MODE"] = "remote"

@@ -73,7 +73,9 @@ class ChatProgressTests(unittest.TestCase):
         self.assert_unchanged(state)
         with patch.object(main, "gateway", side_effect=AssertionError("Greetings must not call AI")):
             greeting = self.send("halo")
-        self.assertEqual(greeting["assistant_message"], REFUSAL_MESSAGE)
+        self.assertNotIn(REFUSAL_MESSAGE, greeting["assistant_message"])
+        self.assertIn("nomor kontak", greeting["assistant_message"])
+        self.assertEqual(greeting["revision"], state["revision"])
         self.assertEqual(greeting["next_slot"], DETAIL)
         completed = self.send("08000000001")
         self.assertEqual(completed["state"], IntakeState.CHAT_MORE)

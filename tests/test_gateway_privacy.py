@@ -60,7 +60,7 @@ class GatewayPrivacyTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("19 Oktober 2026 10:00", content)
             self.assertIn("Rp10000000", content)
             self.assertIn("<untrusted_user_report>", content)
-            self.assertEqual(body["temperature"], 0)
+            self.assertEqual(body["temperature"], 0.3)
             self.assertEqual(body["response_format"], {"type": "json_object"})
             calls.append(request)
             return completion([{"field": bank, "value": "BNI", "confidence": 1.0}])

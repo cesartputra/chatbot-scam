@@ -193,7 +193,7 @@ async function sendText(text, action) {
 async function uploadFile(file, alreadyBusy = false) {
   if (!file || !session?.expected_upload_type) throw new Error('Saat ini asisten sedang meminta jawaban teks. Ikuti pertanyaan di chat terlebih dahulu.');
   if (file.size > 10*1024*1024 || file.size <= 0) throw new Error('Pilih satu file yang tidak kosong, maksimal 10 MiB.');
-  const work = async () => { imageBubble(file); const form = new FormData(); form.append('file',file); await receive(await request(endpoint('upload'),form)); };
+  const work = async () => { imageBubble(file); const form = new FormData(); form.append('file',file); await receive(await request(endpoint('upload'),form),{replyToUser:true}); };
   if (alreadyBusy) await work(); else await run(work,'Sedang memindai dokumen (OCR)' + (session.simulation ? ' · simulasi…' : '…'));
 }
 async function init() {

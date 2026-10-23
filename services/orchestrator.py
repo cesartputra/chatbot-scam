@@ -405,12 +405,12 @@ def turn_message(session, missing):
                 amount = format(Decimal(str(item["nominal_transaksi"])), ",f").replace(",", "_").replace(".", ",").replace("_", ".")
                 transfer_message = f"Transfer sebesar Rp{amount} ke {row.get('nama_penyelenggara')} ({row.get('nomor_rekening_akun')}) sudah saya tambahkan. Ada bukti transfer lain, atau lanjut ke Tahap 5?"
     messages = {
-        IntakeState.STATUS: "Halo, selamat datang di Help Center IASC OJK versi simulasi lokal. Jangan panik, saya akan memandu dan mengisi formulir dummy secara otomatis. Apakah Anda sendiri yang mengalami penipuan ini?",
+        IntakeState.STATUS: "Halo, selamat datang di Help Center IASC OJK versi simulasi lokal. Situasi seperti ini bisa membuat khawatir. Saya akan membantu Anda mengisi laporan dummy, satu langkah setiap kali. Apakah Anda sendiri yang mengalami penipuan ini?",
         IntakeState.KTP: "Baik. Untuk mengisi biodata di Tahap 1, silakan kirim foto KTP melalui tombol lampiran. Demo lokal: gunakan gambar dummy, bukan identitas asli.",
         IntakeState.CONTACT: f"Data KTP atas nama {name} sudah saya masukkan ke Tahap 1. Sekarang ketik nomor telepon aktif dan alamat email Anda, misalnya 08123456789, nama@example.com.",
         IntakeState.CHAT: "Tahap 1 lengkap! Kita masuk Tahap 2. Silakan kirim screenshot bukti chat / komunikasi dengan pelaku melalui tombol lampiran.",
         IntakeState.CHAT_MORE: "Informasi terlapor dan media sudah terisi di Tahap 2. Ada bukti chat lain, atau lanjut ke Tahap 3?",
-        IntakeState.CHRONOLOGY: "Sekarang Tahap 3. Ceritakan singkat bagaimana penipuan terjadi serta tanggal dan jamnya. Saya akan merapikan cerita Anda tanpa menambah fakta.",
+        IntakeState.CHRONOLOGY: "Sekarang Tahap 3. Ceritakan dengan kata-kata Anda sendiri bagaimana kejadian bermula, apa yang terjadi setelahnya, serta tanggal dan jam jika Anda mengingatnya. Cerita Anda akan dicatat tanpa menambah fakta.",
         IntakeState.POLICE: "Apakah Anda memiliki file Laporan Kepolisian? Unggah gambar melalui lampiran atau pilih Lewati / Belum Ada.",
         IntakeState.ACCOUNT: "Kita masuk Tahap 4. Kirim foto atau screenshot bukti kepemilikan rekening Anda, misalnya info rekening m-banking atau buku tabungan.",
         IntakeState.TRANSFER: "Rekening Anda sudah tercatat. Sekarang kirim screenshot bukti transfer ke rekening pelaku.",
@@ -455,7 +455,30 @@ def snapshot(session, *, simulated=True, before=None, advance_state=True):
 def guardrail_refusal(session, *, simulated=True):
     """Policy refusals describe the current draft without advancing or mutating it."""
     response = snapshot(session, simulated=simulated, before=session.data, advance_state=False)
-    response.update(assistant_message=REFUSAL_MESSAGE, reply=REFUSAL_MESSAGE, question=REFUSAL_MESSAGE)
+    message = REFUSAL_MESSAGE + "\n\n" + response["question"]
+    response.update(assistant_message=message, reply=message, question=message)
+    return response
+
+
+def reporting_guidance(session, text, *, simulated=True):
+    """Answer reporting help with templates, preserving every field and workflow state."""
+    response = snapshot(session, simulated=simulated, before=session.data, advance_state=False)
+    if re.search(r"\b(?:panik|takut|cemas|khawatir|stres|stress)\b", text, re.IGNORECASE):
+        prefix = "Saya memahami ini bisa membuat Anda cemas. Anda boleh mengambil jeda; kita lanjutkan laporan satu langkah setiap kali."
+    else:
+        prefix = "Saya siap membantu. Kita fokus pada langkah yang sedang diminta; data yang sudah tercatat tetap tersimpan dalam sesi ini."
+    explanations = {
+        "nama_pemilik_rekening_akun_korban": "Yang diminta adalah nama pemilik rekening Anda sebagai korban, sesuai bukti kepemilikan rekening.",
+        "nomor_rekening_akun_korban": "Yang diminta adalah nomor rekening Anda sebagai korban, yaitu rekening asal dana.",
+        "nama_pemilik_rekening_akun": "Yang diminta adalah nama pemilik rekening tujuan atau penerima dana pada bukti transfer.",
+        "nomor_rekening_akun": "Yang diminta adalah nomor rekening tujuan atau penerima dana pada bukti transfer.",
+        "nomor_telepon_pelapor": "Gunakan nomor telepon aktif Anda sebagai pelapor, bukan nomor pelaku.",
+        "email_pelapor": "Gunakan alamat email aktif Anda sebagai pelapor.",
+    }
+    field = (response["next_slot"] or "").rsplit(".", 1)[-1]
+    parts = [prefix, explanations.get(field), response["question"]]
+    message = "\n\n".join(part for part in parts if part)
+    response.update(assistant_message=message, reply=message, question=message)
     return response
 
 

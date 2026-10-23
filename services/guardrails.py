@@ -46,7 +46,7 @@ _INJECTION = re.compile(
     r"(?:(?:previous|prior|earlier|above|system|developer|safety)\s+)*(?:instructions?|rules?|polic(?:y|ies)|prompts?)\b"
     r"|\b(?:abaikan|lupakan|langgar|lewati)\s+(?:(?:semua|seluruh|segala)\s+)?(?:instruksi|aturan|perintah|kebijakan|batasan)\b"
     r"|\b(?:jangan|tidak\s+perlu)\s+(?:ikuti|patuhi)\s+(?:instruksi|aturan|perintah)\b"
-    r"|\b(?:system\s+prompt|prompt\s+sistem|act\s+as|berperan\s+sebagai|pretend\s+to\s+be|"
+    r"|\b(?:system\s+prompt|prompt\s+sistem|"
     r"jailbreak|developer\s+mode|mode\s+developer|roleplay|you\s+are\s+now|anda\s+sekarang\s+adalah)\b"
     r"|<\s*/?\s*(?:system|user|assistant|developer|untrusted_user_report)\b"
     r"|<\|\s*(?:im_start|im_end|system|assistant|user)\s*\|>"
@@ -61,6 +61,11 @@ _INJECTION = re.compile(
     r"|\b(?:os\.system|subprocess\.(?:run|Popen)|eval|exec)\s*\(|\brm\s+-[a-z]*rf\b",
     re.IGNORECASE,
 )
+_ROLE_OVERRIDE = re.compile(
+    r"(?:^\s*|[.!?\n]\s*|\b(?:anda|kamu|you)\s+(?:(?:harus|bisa|dapat|must|should|will|can|could)\s+)?)"
+    r"(?:(?:tolong|mohon|please|sekarang|now)\s+)*(?:act\s+as|berperan\s+sebagai|pretend\s+to\s+be)\b",
+    re.IGNORECASE,
+)
 _REQUEST = r"(?:buat(?:kan)?|tulis(?:kan)?|jelaskan|ajarkan|ceritakan|generate|write|create|explain|teach|tell\s+me|give\s+me|help\s+me)"
 _UNRELATED = r"(?:kode|coding|pemrograman|algoritma|algorithm|program(?:ming)?|script|python|javascript|typescript|sql|html|css|puisi|pantun|lelucon|joke|poem|resep|recipe|politik|presiden|president|pemilu|election|cuaca|weather|ibu\s+kota|capital\s+city|horoskop|horoscope)"
 _UNRELATED_REQUEST = re.compile(
@@ -69,8 +74,7 @@ _UNRELATED_REQUEST = re.compile(
     r"|\b(?:apa\s+kabar|how\s+are\s+you|siapa\s+kamu|who\s+are\s+you)\b",
     re.IGNORECASE,
 )
-_GREETING = re.compile(r"\s*(?:halo|hello|hai|hi|hey|selamat\s+(?:pagi|siang|sore|malam)|saya\s+bingung|tidak\s+mengerti|bantuan|help)[\s.!?]*", re.IGNORECASE)
-_GENERAL_FINANCE_QUESTION = re.compile(r"^\s*(?:apa\s+itu|what\s+is|jelaskan\s+(?:apa\s+itu\s+)?)\s+(?:rekening|bank|uang|transfer|money|banking)\b", re.IGNORECASE)
+_GREETING = re.compile(r"\s*(?:halo|hello|hai|hi|hey|permisi|assalamualaikum|apa\s+kabar|terima\s+kasih|makasih|thanks|thank\s+you|selamat\s+(?:pagi|siang|sore|malam)|saya\s+bingung|tidak\s+mengerti|bantuan|help)[\s.!?]*", re.IGNORECASE)
 _QUESTION_START = re.compile(r"^(?:apa|siapa|kapan|di\s+mana|bagaimana|mengapa|kenapa|berapa|what|who|when|where|how|why|can\s+you|could\s+you)\b", re.IGNORECASE)
 _REPORT = re.compile(
     r"\b(?:penipuan|penipu|ditipu|tertipu|pelaku|korban|pelapor|terlapor|laporan|melapor|pelaporan|kronologi|"
@@ -88,7 +92,7 @@ def detect_prompt_injection(text: str) -> bool:
     decoded = unicodedata.normalize("NFKC", unescape(unquote(text)))
     normalized = _normalized(decoded)
     spaced = "".join(" " if unicodedata.category(char).startswith("C") else char for char in decoded)
-    return any(_INJECTION.search(value) for value in (decoded, normalized, spaced, re.sub(r"[_-]+", " ", normalized)))
+    return any(_INJECTION.search(value) or _ROLE_OVERRIDE.search(value) for value in (decoded, normalized, spaced, re.sub(r"[_-]+", " ", normalized)))
 
 
 def looks_like_ktp(text: str) -> bool:
@@ -112,25 +116,44 @@ def is_clearly_out_of_scope(text: str) -> bool:
     if not isinstance(text, str):
         return True
     text = _normalized(text)
-    return bool(_GREETING.fullmatch(text) or _UNRELATED_REQUEST.search(text) or _GENERAL_FINANCE_QUESTION.search(text))
+    if _GREETING.fullmatch(text):
+        return False
+    return bool(_UNRELATED_REQUEST.search(text))
+
+
+def is_reporting_help(text: str) -> bool:
+    """Route clarification to local guidance before it can become a field value."""
+    if not isinstance(text, str) or detect_prompt_injection(text) or is_clearly_out_of_scope(text):
+        return False
+    text = _normalized(text).strip()
+    return bool(
+        _GREETING.fullmatch(text) or _QUESTION_START.search(text) or text.endswith("?")
+        or re.fullmatch(r"(?:(?:tolong|mohon|please)[,! ]+)?(?:(?:saya|aku)\s+)?(?:(?:sedang|lagi|sangat)\s+)?(?:panik|takut|cemas|khawatir|bingung|stres|stress|tidak paham|belum paham|nggak paham)(?:\s+(?:sekali|banget))?(?:[,!. ]*(?:tolong|mohon)\s+bantu(?:\s+saya)?)?[.! ]*", text, re.I)
+        or re.fullmatch(r"(?:(?:tolong|mohon)\s+)?(?:bantu(?:an)?|help)(?:\s+(?:saya|aku|me))?[.! ]*", text, re.I)
+        or re.search(r"^(?:maksudnya|caranya|gimana)\b|\b(?:yang mana|yang dimaksud)\s*[?.!]*$", text, re.I)
+    )
 
 
 def is_within_reporting_scope(text: str) -> bool:
     if not isinstance(text, str) or not 0 < len(text) <= MAX_USER_TEXT:
         return False
     text = _normalized(text)
-    if detect_prompt_injection(text) or is_clearly_out_of_scope(text):
+    if detect_prompt_injection(text) or is_clearly_out_of_scope(text) or is_reporting_help(text):
         return False
     # shortcut: lexical scope checks are conservative; ambiguous narratives need human clarification.
     return bool(_REPORT.search(text) or _MISSING_PURCHASE.search(text))
 
 
-def check_user_input(text: str, *, allow_scalar: bool = False) -> str:
+def check_user_input(text: str, *, allow_scalar: bool = False, allow_report_context: bool = False) -> str:
     original = text
     text = sanitize_user_text(text)
     if detect_prompt_injection(original) or detect_prompt_injection(text) or is_clearly_out_of_scope(text):
         raise GuardrailViolation(REFUSAL_MESSAGE)
+    if is_reporting_help(text):
+        raise GuardrailViolation(REFUSAL_MESSAGE)
     if is_within_reporting_scope(text):
+        return text
+    if allow_report_context:
         return text
     if allow_scalar and len(text) <= 500 and "?" not in text and not _QUESTION_START.search(text) and not re.search(r"\b" + _REQUEST + r"\b", text, re.IGNORECASE):
         return text

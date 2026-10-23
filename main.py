@@ -27,12 +27,15 @@ from schemas import FileMetadata, LaporanIASC
 from services.image_processor import ImageProcessingError, process_image, smart_file_reuse
 from services.ktp_ocr import extract_ktp_locally
 from services.llm_gateway import ExtractionResult, GatewayError, LLMGatewayService
-from services.guardrails import GuardrailViolation, check_user_input
+from services.guardrails import (
+    GuardrailViolation, check_user_input, detect_prompt_injection,
+    is_clearly_out_of_scope, is_reporting_help, sanitize_user_text,
+)
 from services.orchestrator import (
     EVIDENCE_KINDS, IntakeState, SESSIONS, advance, apply_patch, build_report,
     flattened, get_path, invalidate, new_session, rate_limit, session_for,
     set_path, snapshot, stage_errors, sync_derived, UPLOAD_STATES, current_errors,
-    prepare_confirmation, normalize_patch, guardrail_refusal,
+    prepare_confirmation, normalize_patch, guardrail_refusal, reporting_guidance,
 )
 
 app.title = "IASC Local Replica · Hybrid AI Intake"
@@ -256,11 +259,34 @@ async def chat_v1(session_id: str, body: ChatInput):
     async with session.lock:
         rate_limit(session)
         try:
-            text = check_user_input(body.text, allow_scalar=session.state != IntakeState.CHRONOLOGY) if body.text else ""
-            action = check_user_input(body.action, allow_scalar=True) if body.action else text
+            text = sanitize_user_text(body.text) if body.text else ""
+            if text and (detect_prompt_injection(body.text) or detect_prompt_injection(text) or is_clearly_out_of_scope(text)):
+                raise GuardrailViolation()
+            action = check_user_input(body.action, allow_scalar=True) if body.action else ""
             for path in body.values:
                 check_user_input(path, allow_scalar=True)
-            values = {path: check_user_input(value, allow_scalar=not path.endswith(".kronologi_kejadian_penipuan")) if isinstance(value, str) else value for path, value in body.values.items()}
+            values = {path: check_user_input(value, allow_scalar=not path.endswith(".kronologi_kejadian_penipuan"), allow_report_context=path.endswith(".kronologi_kejadian_penipuan")) if isinstance(value, str) else value for path, value in body.values.items()}
+            # Clarification belongs to the local workflow, never to an account/name slot.
+            continuation = text.casefold().strip(" .!?") in {"lanjut", "lanjutkan", "boleh lanjut", "sudah cukup"}
+            if text and not body.values and not body.action and not body.confirm:
+                if continuation and session.state in {IntakeState.CHAT_MORE, IntakeState.TRANSFER_MORE}:
+                    action = "continue"
+                elif continuation or is_reporting_help(text):
+                    return reporting_guidance(session, text, simulated=getattr(session, "simulated_extraction", True))
+            if text and not (continuation and action == "continue"):
+                text = check_user_input(text, allow_scalar=session.state != IntakeState.CHRONOLOGY,
+                                        allow_report_context=session.state == IntakeState.CHRONOLOGY)
+            if body.action:
+                allowed_states = {
+                    "continue": {IntakeState.CHAT_MORE, IntakeState.TRANSFER_MORE},
+                    "more_chat": {IntakeState.CHAT_MORE}, "more_transfer": {IntakeState.TRANSFER_MORE},
+                    "skip_police": {IntakeState.POLICE},
+                }
+                missing = current_errors(session)
+                confirm_current = action == "confirm_value" and missing and missing[0]["reason"] == "low_confidence"
+                if not confirm_current and session.state not in allowed_states.get(action, set()):
+                    raise HTTPException(422, reporting_guidance(session, text)["assistant_message"])
+            action = action or text
             candidate = candidate_session(session)
             before = deepcopy(session.data)
             advance(candidate)

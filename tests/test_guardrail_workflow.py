@@ -11,8 +11,8 @@ from fastapi.testclient import TestClient
 import app as legacy
 import main
 from services.guardrails import GuardrailViolation, REFUSAL_MESSAGE
-from services.llm_gateway import SIMULATION_VALUES
-from services.orchestrator import IntakeState, SESSIONS
+from services.llm_gateway import ExtractionResult, LLMGatewayService, SIMULATION_VALUES
+from services.orchestrator import IntakeState, SESSIONS, snapshot
 
 
 class GuardrailWorkflowTests(unittest.TestCase):
@@ -42,7 +42,8 @@ class GuardrailWorkflowTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         state = response.json()
         for key in ("assistant_message", "reply", "question"):
-            self.assertEqual(state[key], REFUSAL_MESSAGE)
+            self.assertTrue(state[key].startswith(REFUSAL_MESSAGE))
+        self.assertGreater(len(state["assistant_message"]), len(REFUSAL_MESSAGE))
         self.assertEqual(state["dom_patches"], [])
         self.assertEqual(self.report_state(), before)
 
@@ -61,7 +62,7 @@ class GuardrailWorkflowTests(unittest.TestCase):
 
     def test_out_of_scope_is_rejected_even_when_a_scalar_field_is_requested(self):
         for state in (IntakeState.PELAPOR, IntakeState.CHRONOLOGY):
-            for text in ("halo", "buatkan kode Python untuk rekening", "siapa presiden Indonesia?", "apa itu rekening?"):
+            for text in ("buatkan kode Python untuk rekening", "siapa presiden Indonesia?"):
                 with self.subTest(state=state, text=text):
                     self.session.state = state
                     self.assert_refused({"text": text})
@@ -89,8 +90,100 @@ class GuardrailWorkflowTests(unittest.TestCase):
         with patch.object(main, "gateway", return_value=gateway):
             response = self.client.post(self.url + "/upload", files={"file": (fixture.name, fixture.read_bytes(), "image/png")})
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["assistant_message"], REFUSAL_MESSAGE)
+        self.assertTrue(response.json()["assistant_message"].startswith(REFUSAL_MESSAGE))
         self.assertEqual(self.report_state(), before)
+
+    def test_greetings_confusion_and_panic_get_local_guidance_without_changes(self):
+        for state in (IntakeState.STATUS, IntakeState.KTP, IntakeState.CHRONOLOGY, IntakeState.CHAT_MORE):
+            for text in ("halo", "saya bingung", "saya panik", "maksudnya apa?", "nomor yang mana?", "apa itu rekening?"):
+                with self.subTest(state=state, text=text):
+                    self.session.state = state
+                    before = self.report_state()
+                    current = snapshot(self.session, advance_state=False)
+                    with patch.object(main, "gateway", side_effect=AssertionError("Reporting help must stay local")):
+                        response = self.client.post(self.url + "/chat", json={"text": text})
+                    self.assertEqual(response.status_code, 200, response.text)
+                    result = response.json()
+                    self.assertNotIn(REFUSAL_MESSAGE, result["assistant_message"])
+                    self.assertIn(current["question"], result["assistant_message"])
+                    self.assertEqual(result["quick_replies"], current["quick_replies"])
+                    self.assertEqual(result["dom_patches"], [])
+                    self.assertEqual(self.report_state(), before)
+                    if text == "saya panik":
+                        self.assertIn("cemas", result["assistant_message"])
+
+    def metadata(self):
+        return {"file_id": "a" * 32, "filename": "dummy.png", "content_type": "image/png", "size_bytes": 100,
+                "sha256": "b" * 64, "url": self.url + "/files/" + "a" * 32}
+
+    def test_question_about_account_owner_is_not_stored_as_the_name(self):
+        self.session.state = IntakeState.ACCOUNT_DETAILS
+        self.session.data["tahap4"] = {"nama_penyelenggara_layanan_korban": "BNI", "nomor_rekening_akun_korban": "0000000000",
+                                        "bukti_kepemilikan_rekening_akun_korban": self.metadata()}
+        before = self.report_state()
+        with patch.object(main, "gateway", side_effect=AssertionError("Clarification must not be extracted as a name")):
+            response = self.client.post(self.url + "/chat", json={"text": "Nama pemilik rekening yang mana?"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("rekening Anda sebagai korban", response.json()["assistant_message"])
+        self.assertEqual(self.report_state(), before)
+        answered = self.client.post(self.url + "/chat", json={"text": "PELAPOR DUMMY"})
+        self.assertEqual(answered.status_code, 200, answered.text)
+        self.assertEqual(answered.json()["state"], IntakeState.TRANSFER)
+        self.assertEqual(self.session.data["tahap4"]["nama_pemilik_rekening_akun_korban"], "PELAPOR DUMMY")
+
+    def test_stale_navigation_action_cannot_be_saved_as_a_name(self):
+        self.session.state = IntakeState.ACCOUNT_DETAILS
+        self.session.data["tahap4"] = {"nama_penyelenggara_layanan_korban": "BNI", "nomor_rekening_akun_korban": "0000000000",
+                                        "bukti_kepemilikan_rekening_akun_korban": self.metadata()}
+        before = self.report_state()
+        with patch.object(main, "gateway", side_effect=AssertionError("Stale buttons must not become report data")):
+            response = self.client.post(self.url + "/chat", json={"text": "Lanjut ke Tahap 3", "action": "continue"})
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertIn("rekening Anda sebagai korban", response.json()["detail"])
+        self.assertEqual(self.report_state(), before)
+
+    def test_contextual_story_without_keywords_is_preserved_locally(self):
+        self.session.state = IntakeState.CHRONOLOGY
+        self.session.evidence["bukti_chat"] = self.metadata()
+        for text in ("Saya beli sepatu di Instagram lalu diblokir.", "Penipu berperan sebagai petugas bank dan meminta saya transfer."):
+            with self.subTest(text=text), patch.object(LLMGatewayService, "_remote", side_effect=AssertionError("Chronology must stay local")):
+                self.session.state = IntakeState.CHRONOLOGY
+                response = self.client.post(self.url + "/chat", json={"text": text})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(self.session.data["tahap3"]["kronologi_kejadian_penipuan"], text)
+            self.assertEqual(response.json()["state"], IntakeState.KEJADIAN)
+            self.assertEqual(response.json()["next_slot"], "tahap3.tanggal_dan_waktu_kejadian")
+
+    def test_casual_continuations_advance_only_the_two_more_evidence_states(self):
+        for state in (IntakeState.STATUS, IntakeState.KTP, IntakeState.CHRONOLOGY, IntakeState.CHAT_MORE, IntakeState.TRANSFER_MORE):
+            for text in ("boleh lanjut?", "lanjut", "lanjutkan", "sudah cukup"):
+                with self.subTest(state=state, text=text):
+                    self.session.state = state
+                    before = self.report_state()
+                    with patch.object(main, "gateway", side_effect=AssertionError("Navigation must stay local")), patch.object(main, "prepare_confirmation") as confirm:
+                        response = self.client.post(self.url + "/chat", json={"text": text})
+                    self.assertEqual(response.status_code, 200, response.text)
+                    if state == IntakeState.CHAT_MORE:
+                        self.assertEqual(response.json()["state"], IntakeState.CHRONOLOGY)
+                        self.assertEqual(self.session.revision, before["revision"] + 1)
+                    elif state == IntakeState.TRANSFER_MORE:
+                        confirm.assert_called_once()
+                    else:
+                        confirm.assert_not_called()
+                        self.assertEqual(self.report_state(), before)
+
+    def test_unreadable_evidence_remains_attached_and_asks_for_missing_fields(self):
+        self.session.state = IntakeState.CHAT
+        gateway = SimpleNamespace(extract=AsyncMock(return_value=ExtractionResult(simulated=False)), simulated=False)
+        fixture = main.ROOT / "fixtures/v1/bukti_chat.png"
+        with patch.object(main, "gateway", return_value=gateway):
+            response = self.client.post(self.url + "/upload", files={"file": (fixture.name, fixture.read_bytes(), "image/png")})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["state"], IntakeState.TERLAPOR)
+        self.assertIsNotNone(response.json()["next_slot"])
+        self.assertNotIn(REFUSAL_MESSAGE, response.json()["assistant_message"])
+        self.assertIn("bukti_chat", self.session.evidence)
+        self.assertEqual(len(self.session.files), 1)
 
     def test_text_limit_and_control_character_sanitization_do_not_allow_bypass(self):
         before = self.report_state()
