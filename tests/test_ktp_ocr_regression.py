@@ -128,10 +128,13 @@ class KtpOCRGatewayRegressionTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(slots=slots), self.assertRaises(GatewayError):
                 await self.extract(slots)
 
-    async def test_chat_field_validation_stays_strict(self):
+    async def test_chat_normalizes_capitalization_but_keeps_enum_validation(self):
         gateway = LLMGatewayService(transport=httpx.MockTransport(lambda request: completion([slot("jenis_kelamin", "PEREMPUAN")])))
+        result = await gateway.extract_chat("PEREMPUAN", ["tahap1.jenis_kelamin"], {})
+        self.assertEqual(result.values, {"tahap1.jenis_kelamin": "Perempuan"})
+        gateway = LLMGatewayService(transport=httpx.MockTransport(lambda request: completion([slot("jenis_kelamin", "TIDAK TERBACA")])))
         with self.assertRaises(GatewayError):
-            await gateway.extract_chat("PEREMPUAN", ["tahap1.jenis_kelamin"], {})
+            await gateway.extract_chat("tidak terbaca", ["tahap1.jenis_kelamin"], {})
 
 
 class KtpOCRWorkflowRegressionTests(unittest.TestCase):

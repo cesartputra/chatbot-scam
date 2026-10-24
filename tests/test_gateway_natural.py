@@ -68,6 +68,12 @@ class NaturalGatewayTests(unittest.IsolatedAsyncioTestCase):
         result = await gateway.synthesize_chronology("Saya membeli sepatu yang tidak dikirim.", {"values": {INCIDENT_SLOT: "19 Oktober 2026 10:00"}})
         self.assertEqual(result.values[INCIDENT_SLOT], "19 Oktober 2026 10:00")
 
+    async def test_chronology_accepts_everyday_time_without_asking_again(self):
+        story = "Pada 19 Oktober 2026 jam 10 pagi saya transfer untuk pembelian sepatu."
+        result = await LLMGatewayService().synthesize_chronology(story, {})
+        self.assertEqual(result.values[INCIDENT_SLOT], "19 Oktober 2026 10:00")
+        self.assertEqual(result.values[STORY_SLOT], story)
+
     async def test_ambiguous_dates_do_not_select_one_and_oversized_story_is_not_truncated(self):
         gateway = LLMGatewayService()
         result = await gateway.synthesize_chronology("Pada 19 Oktober 2026 10:00 saya transfer. Pada 19 Oktober 2026 12:00 saya diblokir.", {})
@@ -102,8 +108,8 @@ class NaturalGatewayTests(unittest.IsolatedAsyncioTestCase):
         gateway = LLMGatewayService()
         result = await gateway.extract_chat("08123456789, pelapor@example.com", [PHONE_SLOT, EMAIL_SLOT], {})
         self.assertEqual(result.values, {PHONE_SLOT: "8123456789", EMAIL_SLOT: "pelapor@example.com"})
-        result = await gateway.extract_chat("Nama Pelaku", ["tahap2.daftar_informasi_terlapor.0.nama_terlapor"], {})
-        self.assertEqual(list(result.values.values()), ["Nama Pelaku"])
+        result = await gateway.extract_chat("Budi Santoso", ["tahap2.daftar_informasi_terlapor.0.nama_terlapor"], {})
+        self.assertEqual(list(result.values.values()), ["Budi Santoso"])
         result = await gateway.extract_chat("2026-10-19 10:00", [INCIDENT_SLOT], {})
         self.assertEqual(result.values[INCIDENT_SLOT], "19 Oktober 2026 10:00")
 

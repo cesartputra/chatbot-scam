@@ -13,7 +13,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ValidationError
 
 from schemas import (
-    FileMetadata, LaporanIASC, Tahap1InformasiPihakPelapor,
+    MONTHS, FileMetadata, LaporanIASC, Tahap1InformasiPihakPelapor,
     Tahap2InformasiPihakTerlapor, Tahap3InformasiKejadian,
     Tahap4InformasiTransaksi, validate_slot_value,
 )
@@ -121,6 +121,7 @@ class IntakeSession:
     data: dict = field(default_factory=lambda: {f"tahap{i}": {} for i in range(1, 6)})
     confidence: dict = field(default_factory=dict)
     sources: dict = field(default_factory=dict)
+    pending_datetime: dict = field(default_factory=dict)
     files: dict = field(default_factory=dict)
     evidence: dict = field(default_factory=dict)
     state: IntakeState = IntakeState.STATUS
@@ -267,6 +268,7 @@ def apply_patch(session, values, confidence, source, *, manual=False):
     session.data = candidate
     invalidate(session)
     for path in validated:
+        session.pending_datetime.pop(path, None)
         session.confidence[path] = 1.0 if manual else confidence.get(path, 0.0)
         session.sources[path] = source
     sync_derived(session)
@@ -391,6 +393,12 @@ def changed_patches(before, after):
 
 def turn_message(session, missing):
     state = session.state
+    if missing and (pending := session.pending_datetime.get(missing[0]["path"])):
+        event = "kejadian" if missing[0]["path"].startswith("tahap3.") else "transaksi"
+        if pending.time is not None:
+            return f"Jam {pending.time:%H:%M} sudah tercatat. Tanggal {event} kapan?", []
+        day = pending.date
+        return f"Tanggal {day.day} {MONTHS[day.month - 1]} {day.year} sudah tercatat. Jam {event} pukul berapa?", []
     if missing and (session.state != IntakeState.CONTACT or len(missing) == 1 or missing[0]["reason"] == "low_confidence"):
         if missing[0]["reason"] == "low_confidence":
             value = get_path(session.data, missing[0]["path"])

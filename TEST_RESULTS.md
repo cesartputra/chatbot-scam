@@ -1,4 +1,4 @@
-# Hasil verifikasi PoC — 23 Oktober 2026
+# Hasil verifikasi PoC — 24 Oktober 2026
 
 Entry point `main:app`, Python 3.14.4 pada macOS. Uji cloud hanya memakai fixture dummy. Contoh KTP pengguna diproses lokal; gambar/nilai identitas tidak disimpan dalam repository. Tidak ada pengiriman laporan ke IASC atau tindakan bank.
 
@@ -6,7 +6,7 @@ Entry point `main:app`, Python 3.14.4 pada macOS. Uji cloud hanya memakai fixtur
 
 | Suite | Hasil |
 | --- | --- |
-| Python: `.venv/bin/python -m pytest -q` | **161 lulus, 389 subtest lulus** |
+| Python: `.venv/bin/python -m pytest -q` | **197 lulus, 478 subtest lulus** |
 | JavaScript: `node --test tests/*.test.mjs` | **27 lulus, 0 gagal** |
 
 Python meliputi:
@@ -28,11 +28,23 @@ Python meliputi:
 - Sumopod: URL/Authorization/model/JSON object, ID Gemini lengkap, confidence yang hilang menjadi 0 untuk konfirmasi manusia, serta error model/izin/kuota tanpa membocorkan respons provider.
 - KTP: Tesseract dan parser lokal; endpoint memanggil OCR langsung tanpa memasuki gateway. Gateway menolak jenis `ktp` pada semua mode serta KTP dummy yang disamarkan sebagai setiap jenis bukti lain. Field valid tetap tersimpan bila field lain tidak terbaca; bacaan bertentangan memerlukan konfirmasi.
 - Privasi: nama, NIK, rekening, kontak, alamat, biodata dari konteks, referensi, serta rahasia berlabel dimasking dan dipulihkan lokal. Token asing/rusak/tidak pernah dikirim ditolak. Kronologi sekarang tetap lokal tanpa penulisan ulang cloud. Nomor di samping tanggal tetap disamarkan dan alamat tidak menelan nominal/waktu kejadian.
-- Koreksi satu kolom pribadi pada API v1 dan API chat lama tetap lokal, termasuk jawaban nama huruf kecil tanpa label.
+- Jawaban pribadi yang jelas tetap lokal, termasuk nama huruf kecil tanpa label. Kalimat yang memerlukan interpretasi memakai token masking; model hanya boleh memilih tepat satu token yang diterbitkan, tanpa menambah nama/nomor. API chat lama tetap lokal.
 
 Node meliputi validasi fase/modal, dokumen perwakilan, parsing nominal dan tanggal, mapping payload lama, shared object URL, serta mapping progresif untuk radio/dropdown/tanggal/file dan koleksi bersarang. Cakupan progresif juga meliputi path/revisi tidak sah, sesi lama, Decimal tanpa kehilangan presisi, konflik manual, reset isian AI saat sesi baru, dan gate hasil simulasi untuk consent/CAPTCHA. Tes tidak menghubungi IASC.
 
-## Regresi percakapan terlalu ketat dan bantuan empatik — 23 Oktober
+## Regresi bukti dan jawaban natural — 24 Oktober
+
+- Akar masalah direproduksi sebelum perbaikan: vision tidak berjalan saat teks OCR kosong, hasil nama/rekening dibuang bila tidak cocok dengan OCR yang keliru, serta kutipan perintah penipu menolak seluruh bukti. Tes baru gagal pada perilaku lama lalu lulus setelah perbaikan. Mesin OCR yang gagal tetap menghentikan forwarding; hasil OCR kosong kini dapat dilanjutkan ke vision gambar. KTP tetap ditolak gateway.
+- Parser nominal menerima `320 ribu`, `320rb`, `1,5 juta`, serta format ribuan/desimal yang jelas dengan Decimal. Nilai negatif, pecahan terlalu kecil, ambigu, dan mata uang asing tidak diam-diam menjadi rupiah.
+- Tanggal/jam bisa diberikan terpisah. `jam 10 pagi` disimpan sementara dan meminta tanggal; tanggal lengkap kemudian mengisi kolom. Koreksi jam memakai tanggal yang sudah diketahui, transaksi tidak meminjam tanggal kejadian, tanggal tidak valid ditolak, dan hari ini tidak diasumsikan.
+- Kalimat lain dapat memakai interpretasi JSON satu kolom aktif, bukan dibatasi dua contoh parser: nominal dalam kata-kata, alias bank panjang, dan ungkapan waktu. Pertanyaan bantuan tetap tidak disimpan sebagai nilai. Prompt injection dan penolakan menjaga draft serta komponen tanggal/jam sementara.
+- Output semantik tetap dibatasi field/skema. Identitas dalam kalimat dimasking; nama karangan, penanda palsu, atau tambahan teks setelah token ditolak. Regresi tambahan direproduksi sebelum perbaikan untuk waktu lama yang menimpa koreksi baru dan nominal USD yang salah dianggap rupiah.
+- **Uji Sumopod nyata, temperature 0,3:** gambar chat dan transfer dummy masing-masing **6/6 field sesuai**, dengan teks OCR lokal sengaja dikosongkan untuk menguji pembacaan piksel. Nominal `tiga ratus dua puluh ribu rupiah` menjadi 320000, kalimat PT Bank Central Asia menjadi BCA, dan `sekitar setengah sepuluh pagi` menjadi jam 09:30 tanpa mengarang tanggal. Nama dummy dalam kalimat dipilih melalui token masking dan dipulihkan lokal setelah prompt menjelaskan hubungan jawaban dengan kolom yang sedang ditanyakan. Semua pengujian memakai fixture/teks dummy, tanpa submit/CAPTCHA.
+- Temperature dipertahankan 0,3: kegagalan sebelumnya berasal dari pembatasan kode, dan interpretasi natural berhasil dengan nilai ini. Tidak ada dependensi baru. Pemeriksaan browser tidak diulang untuk perubahan ini; regresi alur/progressive-fill diuji melalui API dan Node.
+
+## Riwayat percakapan terlalu ketat dan bantuan empatik — 23 Oktober
+
+Bagian ini mencatat perilaku saat itu; pembatasan OCR/vision di bawah telah diperbarui pada 24 Oktober.
 
 - Penyebab direproduksi: OCR screenshot chat/struk sah tidak mengandung kata kunci pelaporan, sehingga vision tidak pernah dipanggil. Satu ketidakcocokan grounding tanggal/nominal juga membuang seluruh unggahan. Pertanyaan “nama pemilik rekening yang mana?” dapat tersimpan sebagai nama.
 - Konteks jenis bukti dari state dipakai untuk vision; kata kunci tertentu tidak wajib. KTP/injeksi tetap diblokir. OCR kosong atau gagal menghasilkan ekstraksi kosong lokal, tanpa forwarding gambar, dengan file tersimpan dan pertanyaan kolom yang belum terisi.
@@ -48,7 +60,7 @@ Node meliputi validasi fase/modal, dokumen perwakilan, parsing nominal dan tangg
 - `services/guardrails.py` mengizinkan tepat empat tugas ekstraksi; tugas lain, penggunaan tugas bukti untuk field yang berbeda, forwarding data KTP, dan URL gambar eksternal ditolak sebelum HTTP.
 - Pola injeksi Indonesia/Inggris, tag role, penyamaran Unicode/karakter kontrol, payload kode/script, serta permintaan di luar pelaporan seperti coding/politik ditolak secara deterministik. Sapaan dan bantuan terkait pengisian memakai template lokal. Pesan di atas 2.000 karakter ditolak dengan HTTP 422 tanpa API.
 - Penolakan diuji pada beberapa state, termasuk konfirmasi dan selesai, serta pada `values`/`action`, upload, dan API lama: data, revisi, file, consent, tiket, dan state tetap; patch baru kosong. Gateway/API cloud lama dinonaktifkan.
-- Schema Pydantic ketat menolak key asing, teks balasan bebas, JSON berkey duplikat, flag relevansi/injeksi tidak aman, dan output palsu yang tidak didukung sumber. Nomor rekening harus mempertahankan nol awal; angka tanggal/nominal tidak dapat dipakai sebagai rekening. Nominal asing tidak dikonversi dan detik transaksi yang tidak tertulis tidak ditambahkan oleh model.
+- Schema Pydantic ketat menolak key asing, teks balasan bebas, JSON berkey duplikat, dan flag relevansi/injeksi tidak aman. Ekstraksi teks bukti dibandingkan dengan teks sumber; vision memakai piksel, sedangkan interpretasi jawaban memakai kontrak satu kolom aktif. Nomor rekening mempertahankan nol awal; angka tanggal/nominal tidak dapat dipakai sebagai rekening. Nominal asing tidak dikonversi dan komponen tanggal/jam yang tidak diketahui ditanyakan.
 - Parsing tanggal/nominal eksplisit tetap lokal, termasuk Decimal besar dengan sen utuh. Kronologi asli dipertahankan lokal; pesan asisten selalu berasal dari template server. Alur progressive-fill tetap tercakup dalam suite penuh.
 - Tesseract nyata memeriksa keempat fixture dummy; KTP dikenali, sedangkan tiga bukti lain lolos pemeriksaan relevansi. Respons vision tiruan kemudian diuji terhadap hasil OCR transfer nyata untuk memastikan fakta yang valid diterima.
 - **Uji Sumopod nyata pada 22 Oktober**: vision `gemini/gemini-3.5-flash-lite` mengekstrak bukti transfer dummy, **6/6 field cocok, 4,7 detik**. Ekstraksi teks `deepseek-v4-flash` mengembalikan bank eksplisit yang benar, **1,6 detik**. Keduanya menerima temperature 0 saat itu, JSON object, serta flag relevansi/injeksi. Temperature terbaru 0,3 diuji pada bagian di atas. Pengukuran sekali, bukan benchmark.

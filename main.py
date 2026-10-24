@@ -23,10 +23,11 @@ ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env", override=False)
 
 from app import app  # Reuse the existing replica, assets and legacy draft API.
-from schemas import FileMetadata, LaporanIASC
+from schemas import FileMetadata, LaporanIASC, to_indonesian_date
 from services.image_processor import ImageProcessingError, process_image, smart_file_reuse
 from services.ktp_ocr import extract_ktp_locally
-from services.llm_gateway import ExtractionResult, GatewayError, LLMGatewayService
+from services.natural_input import ParsedDateTime, parse_report_datetime
+from services.llm_gateway import ExtractionResult, GatewayError, LLMGatewayService, PartialDateTime
 from services.guardrails import (
     GuardrailViolation, check_user_input, detect_prompt_injection,
     is_clearly_out_of_scope, is_reporting_help, sanitize_user_text,
@@ -123,7 +124,7 @@ async def delete_session_v1(session_id: str):
 
 def candidate_session(session):
     candidate = copy(session)
-    for name in ("data", "confidence", "sources", "files", "evidence", "ekyc", "dispatch"):
+    for name in ("data", "confidence", "sources", "files", "evidence", "ekyc", "dispatch", "pending_datetime"):
         setattr(candidate, name, deepcopy(getattr(session, name)))
     return candidate
 
@@ -132,6 +133,36 @@ def commit_session(session, candidate):
     for name, value in candidate.__dict__.items():
         if name not in {"lock", "mutations", "touched"}:
             setattr(session, name, value)
+
+
+def apply_datetime_reply(session, path, text):
+    try:
+        supplied = parse_report_datetime(text)
+    except ValueError:
+        return False
+    try:
+        previous = session.pending_datetime.get(path, ParsedDateTime())
+        day, clock = supplied.date or previous.date, supplied.time or previous.time
+        if day is None or clock is None:
+            context = get_path(session.data, path) or ""
+            if not context and path == "tahap3.tanggal_dan_waktu_kejadian":
+                context = get_path(session.data, "tahap3.kronologi_kejadian_penipuan", "")
+            try:
+                known = parse_report_datetime(context)
+            except ValueError:
+                known = ParsedDateTime()
+            day, clock = day or known.date, clock or known.time
+        if day is not None:
+            to_indonesian_date(day)
+        parsed = ParsedDateTime(date=day, time=clock)
+        if day is not None and clock is not None:
+            apply_patch(session, {path: parsed.format(seconds=path.endswith(".waktu_transaksi"))}, {}, "chat", manual=True)
+        else:
+            session.pending_datetime[path] = parsed
+            invalidate(session)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    return True
 
 
 def remap_evidence(session, kind, values, confidences, metadata):
@@ -275,7 +306,7 @@ async def chat_v1(session_id: str, body: ChatInput):
                     return reporting_guidance(session, text, simulated=getattr(session, "simulated_extraction", True))
             if text and not (continuation and action == "continue"):
                 text = check_user_input(text, allow_scalar=session.state != IntakeState.CHRONOLOGY,
-                                        allow_report_context=session.state == IntakeState.CHRONOLOGY)
+                                        allow_report_context=session.state == IntakeState.CHRONOLOGY or bool(current_errors(session)))
             if body.action:
                 allowed_states = {
                     "continue": {IntakeState.CHAT_MORE, IntakeState.TRANSFER_MORE},
@@ -359,11 +390,29 @@ async def chat_v1(session_id: str, body: ChatInput):
                 if action == "confirm_value" and item["reason"] == "low_confidence":
                     apply_patch(candidate, {path: get_path(candidate.data, path)}, {}, "manual", manual=True)
                 else:
-                    result = await gateway().extract_chat(text, [path], {"values": dict(flattened(candidate.data))})
-                    revision = candidate.revision
-                    apply_patch(candidate, result.values, result.confidence, "chat" if result.simulated else "chat_ai", manual=result.simulated)
-                    if candidate.revision == revision:
-                        raise HTTPException(422, "Saya belum menemukan jawaban untuk kolom ini. " + item["question"])
+                    datetime_slot = path.endswith((".tanggal_dan_waktu_kejadian", ".waktu_transaksi"))
+                    if not (datetime_slot and apply_datetime_reply(candidate, path, text)):
+                        context = {"values": dict(flattened(candidate.data))}
+                        if datetime_slot:
+                            previous = get_path(candidate.data, path) or ""
+                            if not previous and path == "tahap3.tanggal_dan_waktu_kejadian":
+                                previous = get_path(candidate.data, "tahap3.kronologi_kejadian_penipuan", "")
+                            pending = candidate.pending_datetime.get(path, ParsedDateTime())
+                            context["context_text"] = " ".join(filter(None, (previous, pending.date.isoformat() if pending.date else "", pending.time.isoformat() if pending.time else "")))
+                        revision = candidate.revision
+                        try:
+                            result = await gateway().extract_chat(text, [path], context)
+                        except PartialDateTime as exc:
+                            if not datetime_slot:
+                                raise
+                            parts_text = " ".join(value.isoformat() for value in (exc.parts.date, exc.parts.time) if value is not None)
+                            if not apply_datetime_reply(candidate, path, parts_text):
+                                raise
+                        else:
+                            manual = result.simulated or path.endswith(".nominal_transaksi")
+                            apply_patch(candidate, result.values, result.confidence, "chat" if manual else "chat_ai", manual=manual)
+                        if candidate.revision == revision:
+                            raise HTTPException(422, "Saya belum menemukan jawaban untuk kolom ini. " + item["question"])
             else:
                 raise HTTPException(409, "Silakan unggah satu dokumen yang sedang diminta melalui tombol lampiran.")
         except GuardrailViolation:

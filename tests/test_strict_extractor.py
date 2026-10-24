@@ -158,21 +158,21 @@ class StrictExtractorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(calls), 1)
         self.assertIn("Authorized task: extract_chat_proof", calls[0]["messages"][0]["content"])
 
-    async def test_partial_image_extraction_keeps_grounded_fields_without_invented_values(self):
+    async def test_image_values_use_pixels_while_currency_and_dates_still_normalize(self):
         image = process_image((ROOT / "fixtures/v1/bukti_transfer.png").read_bytes(), "bukti.png", "image/png")
         bank = "tahap4.daftar_penyelenggara_terlapor.0.nama_penyelenggara"
-        text = "BCA\n0000000001\nNOMINAL IDR 320,000.00\n19/10/2026 10:00:12"
+        text = "BCA\nNOMINAL IDR 320,000.00\n19/10/2026 10:00:12"
         prefix = "tahap4.daftar_penyelenggara_terlapor.0.daftar_rincian_transaksi.0."
         slots = [
             {"field": bank, "value": "BCA", "confidence": 0.99},
-            {"field": ACCOUNT, "value": "0000000999", "confidence": 0.99},
+            {"field": ACCOUNT, "value": "0000000001", "confidence": 0.99},
             {"field": prefix + "nominal_transaksi", "value": "IDR 320,000.00", "confidence": 0.95},
             {"field": prefix + "waktu_transaksi", "value": "19/10/2026 10:00:12", "confidence": 0.9},
         ]
         with patch("services.llm_gateway.local_ocr_text", return_value=text):
             result = await LLMGatewayService(transport=httpx.MockTransport(lambda request: completion(payload(slots)))).extract("bukti_transfer", image.data, image.mime_type)
-        self.assertEqual(result.values, {bank: "BCA", prefix + "nominal_transaksi": Decimal("320000.00"), prefix + "waktu_transaksi": "19 Oktober 2026 10:00:12"})
-        self.assertNotIn(ACCOUNT, result.confidence)
+        self.assertEqual(result.values, {bank: "BCA", ACCOUNT: "0000000001", prefix + "nominal_transaksi": Decimal("320000.00"), prefix + "waktu_transaksi": "19 Oktober 2026 10:00:12"})
+        self.assertEqual(result.confidence[ACCOUNT], 0.99)
         self.assertEqual(result.values.keys(), result.confidence.keys())
 
     @unittest.skipUnless(shutil.which("tesseract"), "Tesseract not installed")
