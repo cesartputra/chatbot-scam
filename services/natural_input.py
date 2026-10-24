@@ -109,7 +109,7 @@ _DATE_PATTERNS = (
 )
 _CLOCK = re.compile(
     r"(?<![\w:.-])(?:(?P<label>jam|pukul)\s*)?(?P<hour>\d{1,2})"
-    r"(?:(?P<sep>[:.])(?P<minute>\d{2})(?::(?P<second>\d{2}))?)?\s*"
+    r"(?:(?P<sep>[:.])(?P<minute>\d{2})(?:(?P=sep)(?P<second>\d{2}))?)?\s*"
     r"(?P<part>pagi|siang|sore|malam|dini\s*hari|a\.?m\.?|p\.?m\.?)?(?![\w:]|[.,]\d)", re.I,
 )
 

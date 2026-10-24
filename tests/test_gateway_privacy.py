@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import unittest
 from unittest.mock import patch
 
@@ -60,7 +61,7 @@ class GatewayPrivacyTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("19 Oktober 2026 10:00", content)
             self.assertIn("Rp10000000", content)
             self.assertIn("<untrusted_user_report>", content)
-            self.assertEqual(body["temperature"], 0.3)
+            self.assertEqual(body["temperature"], 0.7)
             self.assertEqual(body["response_format"], {"type": "json_object"})
             calls.append(request)
             return completion([{"field": bank, "value": "BNI", "confidence": 1.0}])
@@ -73,12 +74,20 @@ class GatewayPrivacyTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.simulated)
         self.assertEqual(len(calls), 1)
 
-    async def test_chronology_keeps_private_story_local_without_cloud_rewriting(self):
-        def forbidden(request):
-            self.fail("Chronology and its private details must stay local")
+    async def test_chronology_masks_private_story_and_omits_identity_biodata(self):
+        def handler(request):
+            content = json.loads(request.content)["messages"][1]["content"]
+            for private in self.context.values():
+                self.assertNotIn(private, content)
+            self.assertNotIn("tahap1.", content)
+            self.assertNotIn("[NIK_", content)
+            self.assertNotIn("[TANGGAL_LAHIR_", content)
+            account = re.search(r"\[REKENING_\d+\]", content)[0]
+            return completion([{"field": STORY_SLOT, "value": f"Pada 19 Oktober 2026 pukul 10:00, saya mentransfer Rp10000000 dari rekening {account} untuk pesanan yang tidak dikirim.", "confidence": 0.95}])
 
-        result = await LLMGatewayService(transport=httpx.MockTransport(forbidden)).synthesize_chronology(self.story, self.context)
-        self.assertEqual(result.values[STORY_SLOT], self.story)
+        result = await LLMGatewayService(transport=httpx.MockTransport(handler)).synthesize_chronology(self.story, self.context)
+        self.assertIn("0000123456", result.values[STORY_SLOT])
+        self.assertNotIn("0000000000000000", result.values[STORY_SLOT])
         self.assertEqual(result.values[INCIDENT_SLOT], "19 Oktober 2026 10:00")
 
     async def test_provider_invented_sensitive_tokens_are_rejected(self):

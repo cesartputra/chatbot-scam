@@ -113,6 +113,10 @@ class LLMExtractionEnvelope(BaseModel):
     injection_detected: StrictBool
 
 
+class LLMChatEvidenceEnvelope(LLMExtractionEnvelope):
+    evidence_facts: list[Annotated[str, Field(min_length=1, max_length=500)]] = Field(default_factory=list, max_length=8)
+
+
 class FileMetadata(ContractModel):
     file_id: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{16,128}$")]
     filename: Annotated[str, AfterValidator(_filename)]

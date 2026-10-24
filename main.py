@@ -124,7 +124,7 @@ async def delete_session_v1(session_id: str):
 
 def candidate_session(session):
     candidate = copy(session)
-    for name in ("data", "confidence", "sources", "files", "evidence", "ekyc", "dispatch", "pending_datetime"):
+    for name in ("data", "confidence", "sources", "files", "evidence", "evidence_facts", "ekyc", "dispatch", "pending_datetime"):
         setattr(candidate, name, deepcopy(getattr(session, name)))
     return candidate
 
@@ -133,6 +133,20 @@ def commit_session(session, candidate):
     for name, value in candidate.__dict__.items():
         if name not in {"lock", "mutations", "touched"}:
             setattr(session, name, value)
+
+
+def chronology_context(session):
+    return {"values": dict(flattened(session.data)),
+            "evidence_facts": [fact for facts in session.evidence_facts.values() for fact in facts]}
+
+
+async def refresh_chronology(session):
+    path = "tahap3.kronologi_kejadian_penipuan"
+    if session.raw_chronology and session.sources.get(path) == "chronology_ai":
+        result = await gateway().synthesize_chronology(session.raw_chronology, chronology_context(session))
+        if not result.values.get(path):
+            raise GatewayError("AI belum dapat menyusun kronologi. Coba kembali atau koreksi kronologi secara manual.")
+        apply_patch(session, result.values, result.confidence, "chat" if result.simulated else "chronology_ai", manual=result.simulated)
 
 
 def apply_datetime_reply(session, path, text):
@@ -238,6 +252,8 @@ async def upload_evidence(session_id: str, file: UploadFile = File(...)):
         metadata = FileMetadata(file_id=file_id, filename=image.filename, content_type=image.mime_type, size_bytes=image.size, sha256=image.sha256, url=f"/api/v1/session/{session_id}/files/{file_id}").model_dump(mode="json")
         candidate.files[file_id] = {"metadata": deepcopy(metadata), "data": image.data}
         candidate.evidence[kind] = metadata
+        if kind == "bukti_chat" and result.evidence_facts:
+            candidate.evidence_facts[file_id] = list(result.evidence_facts)
         if result:
             values, confidence, pointers = remap_evidence(candidate, kind, result.values, result.confidence, metadata)
             source = "simulation:" if result.simulated else "local_ocr:" if kind == "ktp" else "vision:"
@@ -328,6 +344,7 @@ async def chat_v1(session_id: str, body: ChatInput):
                 was_final = candidate.state in {IntakeState.CONFIRM, IntakeState.COMPLETED}
                 apply_patch(candidate, values, {}, "manual", manual=True)
                 if was_final:
+                    await refresh_chronology(candidate)
                     prepare_confirmation(candidate)
             elif candidate.state == IntakeState.STATUS:
                 if normalized in {"ya, saya sendiri", "ya", "sendiri", "saya sendiri"}:
@@ -355,10 +372,11 @@ async def chat_v1(session_id: str, body: ChatInput):
                     raise HTTPException(422, "Pilih bukti chat lain atau lanjut ke Tahap 3.")
                 candidate.revision += 1
             elif candidate.state == IntakeState.CHRONOLOGY:
-                result = await gateway().synthesize_chronology(text, {"values": dict(flattened(candidate.data))})
+                result = await gateway().synthesize_chronology(text, chronology_context(candidate))
                 if not result.values.get("tahap3.kronologi_kejadian_penipuan"):
                     raise HTTPException(422, "Ceritakan kronologi singkat Anda terlebih dahulu.")
-                apply_patch(candidate, result.values, result.confidence, "chat" if result.simulated else "chat_ai", manual=result.simulated)
+                apply_patch(candidate, result.values, result.confidence, "chat" if result.simulated else "chronology_ai", manual=result.simulated)
+                candidate.raw_chronology = text
                 set_path(candidate.data, "tahap3.upload_bukti_pendukung_kejadian", candidate.evidence["bukti_chat"])
                 candidate.chronology_received = True
                 candidate.state = IntakeState.KEJADIAN
@@ -373,6 +391,7 @@ async def chat_v1(session_id: str, body: ChatInput):
                 if action == "more_transfer" or "transfer lain" in normalized:
                     candidate.state = IntakeState.TRANSFER
                 elif action == "continue" or "lanjut" in normalized:
+                    await refresh_chronology(candidate)
                     prepare_confirmation(candidate)
                 else:
                     raise HTTPException(422, "Pilih bukti transfer lain atau lanjut ke Tahap 5.")

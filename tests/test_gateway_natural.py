@@ -1,3 +1,4 @@
+import json
 import os
 import unittest
 from unittest.mock import patch
@@ -82,18 +83,23 @@ class NaturalGatewayTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(story=story[:60]), self.assertRaises(ValueError):
                 await gateway.synthesize_chronology(story, {})
 
-    async def test_remote_chronology_keeps_actual_facts_locally_without_llm_rewriting(self):
+    async def test_remote_chronology_uses_ai_but_keeps_timestamp_derivation_local(self):
         os.environ["AI_MODE"] = "remote"
 
-        def forbidden(request):
-            self.fail("Chronology must not be rewritten or augmented by the cloud model")
+        def handler(request):
+            content = json.loads(request.content)["messages"][1]["content"]
+            self.assertNotIn("secret-key", content)
+            return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": json.dumps({
+                "slots": [{"field": STORY_SLOT, "value": "Saya melakukan pembelian sepatu, tetapi barang tidak dikirim.", "confidence": 0.95}],
+                "is_relevant_to_scam_report": True, "injection_detected": False,
+            })}}]})
 
-        gateway = LLMGatewayService(transport=httpx.MockTransport(forbidden))
+        gateway = LLMGatewayService(transport=httpx.MockTransport(handler))
         story = "Saya membeli sepatu yang tidak dikirim."
         result = await gateway.synthesize_chronology(story, {"api_key": "secret-key"})
-        self.assertEqual(result.values[STORY_SLOT], story)
+        self.assertIn("pembelian sepatu", result.values[STORY_SLOT])
         self.assertNotIn(INCIDENT_SLOT, result.values)
-        self.assertEqual(result.confidence[STORY_SLOT], 1.0)
+        self.assertEqual(result.confidence[STORY_SLOT], 0.95)
         self.assertFalse(result.simulated)
         result = await gateway.synthesize_chronology("Pada 19 Oktober 2026 10:00 saya transfer untuk sepatu yang tidak dikirim.", {})
         self.assertEqual(result.values[INCIDENT_SLOT], "19 Oktober 2026 10:00")

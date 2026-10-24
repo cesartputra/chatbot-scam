@@ -124,6 +124,8 @@ class IntakeSession:
     pending_datetime: dict = field(default_factory=dict)
     files: dict = field(default_factory=dict)
     evidence: dict = field(default_factory=dict)
+    evidence_facts: dict = field(default_factory=dict)
+    raw_chronology: str = ""
     state: IntakeState = IntakeState.STATUS
     confirmed: bool = False
     ekyc: dict = field(default_factory=lambda: {"verified": False, "simulated": True})
@@ -418,7 +420,7 @@ def turn_message(session, missing):
         IntakeState.CONTACT: f"Data KTP atas nama {name} sudah saya masukkan ke Tahap 1. Sekarang ketik nomor telepon aktif dan alamat email Anda, misalnya 08123456789, nama@example.com.",
         IntakeState.CHAT: "Tahap 1 lengkap! Kita masuk Tahap 2. Silakan kirim screenshot bukti chat / komunikasi dengan pelaku melalui tombol lampiran.",
         IntakeState.CHAT_MORE: "Informasi terlapor dan media sudah terisi di Tahap 2. Ada bukti chat lain, atau lanjut ke Tahap 3?",
-        IntakeState.CHRONOLOGY: "Sekarang Tahap 3. Ceritakan dengan kata-kata Anda sendiri bagaimana kejadian bermula, apa yang terjadi setelahnya, serta tanggal dan jam jika Anda mengingatnya. Cerita Anda akan dicatat tanpa menambah fakta.",
+        IntakeState.CHRONOLOGY: "Sekarang Tahap 3. Ceritakan dengan kata-kata Anda sendiri bagaimana kejadian bermula, apa yang terjadi setelahnya, serta tanggal dan jam jika Anda mengingatnya. AI akan menyusun kronologi dari cerita dan bukti yang tercatat; periksa kembali hasilnya.",
         IntakeState.POLICE: "Apakah Anda memiliki file Laporan Kepolisian? Unggah gambar melalui lampiran atau pilih Lewati / Belum Ada.",
         IntakeState.ACCOUNT: "Kita masuk Tahap 4. Kirim foto atau screenshot bukti kepemilikan rekening Anda, misalnya info rekening m-banking atau buku tabungan.",
         IntakeState.TRANSFER: "Rekening Anda sudah tercatat. Sekarang kirim screenshot bukti transfer ke rekening pelaku.",

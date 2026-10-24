@@ -196,7 +196,7 @@ class StrictExtractorTests(unittest.IsolatedAsyncioTestCase):
 
         def handler(request):
             body = json.loads(request.content)
-            self.assertEqual(body["temperature"], 0.3)
+            self.assertEqual(body["temperature"], 0.7)
             self.assertEqual(body["response_format"], {"type": "json_object"})
             self.assertIn("<untrusted_user_report>", body["messages"][1]["content"][0]["text"])
             calls.append(request)

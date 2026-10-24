@@ -125,7 +125,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             requests.append(body)
             self.assertEqual(request.url.path, "/v1/chat/completions")
             self.assertEqual(body["response_format"], {"type": "json_object"})
-            self.assertEqual(body["temperature"], 0.3)
+            self.assertEqual(body["temperature"], 0.7)
             self.assertIn("<untrusted_user_report>", body["messages"][1]["content"][0]["text"])
             return completion([{"field": slot, "value": "BCA", "confidence": 0.9}])
 
@@ -155,7 +155,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             requests.append(body)
             self.assertEqual(body["model"], "chat-test")
             self.assertEqual(body["response_format"], {"type": "json_object"})
-            self.assertEqual(body["temperature"], 0.3)
+            self.assertEqual(body["temperature"], 0.7)
             self.assertIn("<untrusted_user_report>", body["messages"][1]["content"])
             self.assertNotIn("secret", body["messages"][1]["content"])
             self.assertNotIn("PELAPOR DUMMY", body["messages"][1]["content"])

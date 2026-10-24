@@ -6,14 +6,14 @@ Entry point `main:app`, Python 3.14.4 pada macOS. Uji cloud hanya memakai fixtur
 
 | Suite | Hasil |
 | --- | --- |
-| Python: `.venv/bin/python -m pytest -q` | **197 lulus, 478 subtest lulus** |
+| Python: `.venv/bin/python -m pytest -q` | **234 lulus, 522 subtest lulus** |
 | JavaScript: `node --test tests/*.test.mjs` | **27 lulus, 0 gagal** |
 
 Python meliputi:
 
 - Urutan state percakapan dari status pelapor sampai tiket lokal; server menentukan jenis unggahan tunggal dan menolak lompatan tahap.
 - Ekstraksi nomor HP/email dari satu jawaban alami, prefix Indonesia, kontak parsial, nomor di alamat email, dan penolakan kontak ambigu.
-- Kronologi berdasarkan cerita pengguna, tanggal/jam eksplisit, permintaan waktu yang belum disebut, serta penolakan tanggal yang ditambahkan AI.
+- Sintesis kronologi AI dari cerita, fakta chat, terlapor/media, dan transaksi, dengan timestamp kejadian tetap ditentukan lokal. Kronologi AI diperbarui pada ringkasan akhir; koreksi manual dilindungi.
 - Lampiran laporan polisi opsional atau dilewati; bukti chat dipakai ulang dan chat tambahan menambah baris dengan file yang sesuai.
 - Transfer tambahan menambah rincian pada penerima yang sama atau menambah penerima baru tanpa menghapus transaksi lama.
 - Confidence di bawah 0,85 menahan alur; konfirmasi manusia memperbarui confidence. Ketidakpastian chat remote dipertahankan.
@@ -24,15 +24,26 @@ Python meliputi:
 - Kepemilikan file per sesi, penolakan metadata palsu, expiry/penghapusan/kapasitas sesi, origin/host, batas permintaan, dan error tanpa echo data pribadi.
 - Jawaban CAPTCHA lokal melalui chat membuat tiket `SIM-…` tanpa akses jaringan; persetujuan eksplisit pada adapter, lima percobaan salah, dan hasil idempoten.
 - Adapter DOM/webhook mock, penolakan endpoint eksternal, e-KYC tiruan opsional, serta regresi API/asisten lama.
-- Gateway HTTP tiruan: JSON object dan temperature 0,3, pemilihan model, field terlarang/duplikat, confidence invalid, refusal/timeout/error. Kegagalan provider tidak beralih ke dummy.
+- Gateway HTTP tiruan: JSON object dan temperature 0,7, pemilihan model, field terlarang/duplikat, confidence invalid, refusal/timeout/error. Kegagalan provider tidak beralih ke dummy.
 - Sumopod: URL/Authorization/model/JSON object, ID Gemini lengkap, confidence yang hilang menjadi 0 untuk konfirmasi manusia, serta error model/izin/kuota tanpa membocorkan respons provider.
 - KTP: Tesseract dan parser lokal; endpoint memanggil OCR langsung tanpa memasuki gateway. Gateway menolak jenis `ktp` pada semua mode serta KTP dummy yang disamarkan sebagai setiap jenis bukti lain. Field valid tetap tersimpan bila field lain tidak terbaca; bacaan bertentangan memerlukan konfirmasi.
-- Privasi: nama, NIK, rekening, kontak, alamat, biodata dari konteks, referensi, serta rahasia berlabel dimasking dan dipulihkan lokal. Token asing/rusak/tidak pernah dikirim ditolak. Kronologi sekarang tetap lokal tanpa penulisan ulang cloud. Nomor di samping tanggal tetap disamarkan dan alamat tidak menelan nominal/waktu kejadian.
+- Privasi: nama, NIK, rekening, kontak, alamat, biodata dari konteks, referensi, serta rahasia berlabel dimasking. Token asing/rusak/tidak pernah dikirim ditolak. Konteks sintesis kronologi mengecualikan biodata KTP/CAPTCHA dan menghapus token biodata/rahasia sebelum HTTP. Token pribadi yang relevan dipulihkan lokal setelah validasi.
 - Jawaban pribadi yang jelas tetap lokal, termasuk nama huruf kecil tanpa label. Kalimat yang memerlukan interpretasi memakai token masking; model hanya boleh memilih tepat satu token yang diterbitkan, tanpa menambah nama/nomor. API chat lama tetap lokal.
 
 Node meliputi validasi fase/modal, dokumen perwakilan, parsing nominal dan tanggal, mapping payload lama, shared object URL, serta mapping progresif untuk radio/dropdown/tanggal/file dan koleksi bersarang. Cakupan progresif juga meliputi path/revisi tidak sah, sesi lama, Decimal tanpa kehilangan presisi, konflik manual, reset isian AI saat sesi baru, dan gate hasil simulasi untuk consent/CAPTCHA. Tes tidak menghubungi IASC.
 
-## Regresi bukti dan jawaban natural — 24 Oktober
+## Kronologi AI dan temperature 0,7 — 24 Oktober
+
+- Perilaku lama direproduksi: mode remote mengembalikan cerita pengguna persis tanpa memanggil AI. Tes baru gagal sebelum perubahan, lalu lulus untuk sintesis dari cerita dan konteks yang dimasking.
+- Vision bukti chat kini mengembalikan metadata `evidence_facts` terbatas (maksimal delapan fakta/kutipan, 500 karakter per fakta). Penanda privasi dikembalikan ke nilai lokal sebelum fakta disimpan privat pada sesi; regresi token yang tidak dipulihkan direproduksi dan diperbaiki.
+- Cerita asli disimpan privat. Sintesis awal menggunakan fakta yang tersedia pada Tahap 3, lalu diperbarui saat melanjutkan dari bukti transfer ke Tahap 5. Koreksi fakta pada ringkasan memperbarui kronologi AI; koreksi manual pada kronologi tidak ditimpa. Kegagalan API mempertahankan data, revisi, state, cerita asli, dan fakta bukti.
+- Output hanya boleh berisi satu field kronologi dalam JSON, maksimal 4.000 karakter. Field tambahan, balasan obrolan bebas, nominal/waktu/identitas baru yang terdeteksi, token palsu/rahasia, serta beberapa kejadian dan pembalikan negasi yang tidak didukung ditolak. Timestamp kejadian tidak diserahkan ke model. Confidence rendah tidak dinaikkan otomatis.
+- Pemeriksaan nominal dan waktu membandingkan nilai bertipe, bukan sekadar digit. Regresi mencakup transfer sah yang hanya terbukti dari baris transaksi lengkap, metadata confidence yang salah terbaca sebagai jam, format nominal berbeda, pemulihan token, privasi outbound, serta perlindungan koreksi manual.
+- **Uji Sumopod nyata, temperature 0,7:** fixture chat/rekening/transfer menghasilkan 6/3/6 field; chat menghasilkan enam fakta. Sintesis awal dan akhir berhasil menghasilkan 511/616 karakter dari cerita singkat; hasil akhir mencakup terlapor, WhatsApp, rekening BNI/BCA, dan rincian transfer. Uji memakai data dummy tanpa submit/CAPTCHA. Respons model tertentu ditolak pemeriksaan fakta; heuristik dan prompt tidak menjamin semua keluaran benar atau selalu diterima.
+- Uji alur aplikasi menemukan penolakan palsu pada format jam Indonesia `10.00.00`. Regresi direproduksi sebelum perbaikan parser bersama; hasil live yang sebelumnya ditolak kini lolos pemeriksaan fakta. **ASGI dengan Sumopod nyata** kemudian berhasil: status → KTP dummy lokal → kontak → vision chat → kronologi awal → lewati laporan polisi → vision rekening/transfer → kronologi akhir → `FINAL_CONFIRMATION`. Kronologi awal/akhir 413/499 karakter; cerita asli tetap tersimpan, sumber `chronology_ai`, S&K belum disetujui, `submitted:false`, CAPTCHA tidak dijawab. Sesi pengujian dihapus.
+- Tepat empat nama tugas tetap dipertahankan; sintesis hanya memakai `extract_report_fields` pada jalur kronologi khusus. Tidak ada dependensi baru. Browser belum diulang; alur/progressive-fill tercakup tes API dan Node.
+
+## Riwayat bukti dan jawaban natural — 24 Oktober (sebelum sintesis kronologi)
 
 - Akar masalah direproduksi sebelum perbaikan: vision tidak berjalan saat teks OCR kosong, hasil nama/rekening dibuang bila tidak cocok dengan OCR yang keliru, serta kutipan perintah penipu menolak seluruh bukti. Tes baru gagal pada perilaku lama lalu lulus setelah perbaikan. Mesin OCR yang gagal tetap menghentikan forwarding; hasil OCR kosong kini dapat dilanjutkan ke vision gambar. KTP tetap ditolak gateway.
 - Parser nominal menerima `320 ribu`, `320rb`, `1,5 juta`, serta format ribuan/desimal yang jelas dengan Decimal. Nilai negatif, pecahan terlalu kecil, ambigu, dan mata uang asing tidak diam-diam menjadi rupiah.
@@ -40,7 +51,7 @@ Node meliputi validasi fase/modal, dokumen perwakilan, parsing nominal dan tangg
 - Kalimat lain dapat memakai interpretasi JSON satu kolom aktif, bukan dibatasi dua contoh parser: nominal dalam kata-kata, alias bank panjang, dan ungkapan waktu. Pertanyaan bantuan tetap tidak disimpan sebagai nilai. Prompt injection dan penolakan menjaga draft serta komponen tanggal/jam sementara.
 - Output semantik tetap dibatasi field/skema. Identitas dalam kalimat dimasking; nama karangan, penanda palsu, atau tambahan teks setelah token ditolak. Regresi tambahan direproduksi sebelum perbaikan untuk waktu lama yang menimpa koreksi baru dan nominal USD yang salah dianggap rupiah.
 - **Uji Sumopod nyata, temperature 0,3:** gambar chat dan transfer dummy masing-masing **6/6 field sesuai**, dengan teks OCR lokal sengaja dikosongkan untuk menguji pembacaan piksel. Nominal `tiga ratus dua puluh ribu rupiah` menjadi 320000, kalimat PT Bank Central Asia menjadi BCA, dan `sekitar setengah sepuluh pagi` menjadi jam 09:30 tanpa mengarang tanggal. Nama dummy dalam kalimat dipilih melalui token masking dan dipulihkan lokal setelah prompt menjelaskan hubungan jawaban dengan kolom yang sedang ditanyakan. Semua pengujian memakai fixture/teks dummy, tanpa submit/CAPTCHA.
-- Temperature dipertahankan 0,3: kegagalan sebelumnya berasal dari pembatasan kode, dan interpretasi natural berhasil dengan nilai ini. Tidak ada dependensi baru. Pemeriksaan browser tidak diulang untuk perubahan ini; regresi alur/progressive-fill diuji melalui API dan Node.
+- Pada pemeriksaan ini temperature masih 0,3. Perubahan sintesis terbaru di atas menggunakan 0,7 sesuai permintaan pengguna. Tidak ada dependensi baru. Pemeriksaan browser tidak diulang; regresi alur/progressive-fill diuji melalui API dan Node.
 
 ## Riwayat percakapan terlalu ketat dan bantuan empatik — 23 Oktober
 
@@ -61,9 +72,9 @@ Bagian ini mencatat perilaku saat itu; pembatasan OCR/vision di bawah telah dipe
 - Pola injeksi Indonesia/Inggris, tag role, penyamaran Unicode/karakter kontrol, payload kode/script, serta permintaan di luar pelaporan seperti coding/politik ditolak secara deterministik. Sapaan dan bantuan terkait pengisian memakai template lokal. Pesan di atas 2.000 karakter ditolak dengan HTTP 422 tanpa API.
 - Penolakan diuji pada beberapa state, termasuk konfirmasi dan selesai, serta pada `values`/`action`, upload, dan API lama: data, revisi, file, consent, tiket, dan state tetap; patch baru kosong. Gateway/API cloud lama dinonaktifkan.
 - Schema Pydantic ketat menolak key asing, teks balasan bebas, JSON berkey duplikat, dan flag relevansi/injeksi tidak aman. Ekstraksi teks bukti dibandingkan dengan teks sumber; vision memakai piksel, sedangkan interpretasi jawaban memakai kontrak satu kolom aktif. Nomor rekening mempertahankan nol awal; angka tanggal/nominal tidak dapat dipakai sebagai rekening. Nominal asing tidak dikonversi dan komponen tanggal/jam yang tidak diketahui ditanyakan.
-- Parsing tanggal/nominal eksplisit tetap lokal, termasuk Decimal besar dengan sen utuh. Kronologi asli dipertahankan lokal; pesan asisten selalu berasal dari template server. Alur progressive-fill tetap tercakup dalam suite penuh.
+- Parsing tanggal/nominal eksplisit tetap lokal, termasuk Decimal besar dengan sen utuh. Kronologi asli dipertahankan privat; hasil sintesis AI hanya mengisi kolom kronologi dan pesan percakapan tetap berasal dari template server. Alur progressive-fill tercakup dalam suite penuh.
 - Tesseract nyata memeriksa keempat fixture dummy; KTP dikenali, sedangkan tiga bukti lain lolos pemeriksaan relevansi. Respons vision tiruan kemudian diuji terhadap hasil OCR transfer nyata untuk memastikan fakta yang valid diterima.
-- **Uji Sumopod nyata pada 22 Oktober**: vision `gemini/gemini-3.5-flash-lite` mengekstrak bukti transfer dummy, **6/6 field cocok, 4,7 detik**. Ekstraksi teks `deepseek-v4-flash` mengembalikan bank eksplisit yang benar, **1,6 detik**. Keduanya menerima temperature 0 saat itu, JSON object, serta flag relevansi/injeksi. Temperature terbaru 0,3 diuji pada bagian di atas. Pengukuran sekali, bukan benchmark.
+- **Uji Sumopod nyata pada 22 Oktober**: vision `gemini/gemini-3.5-flash-lite` mengekstrak bukti transfer dummy, **6/6 field cocok, 4,7 detik**. Ekstraksi teks `deepseek-v4-flash` mengembalikan bank eksplisit yang benar, **1,6 detik**. Keduanya menerima temperature 0 saat itu, JSON object, serta flag relevansi/injeksi. Temperature 0,3 dan terbaru 0,7 diuji pada bagian di atas. Pengukuran sekali, bukan benchmark.
 - Tidak ada data identitas nyata, request submit, jawaban CAPTCHA, atau tindakan bank pada uji cloud ini. Alur browser penuh tidak diulang untuk guardrail; pengujian API/state dan Node mencakup regresinya.
 
 OCR dan pola bersifat heuristik: dapat menolak bukti sah dan tidak membuktikan kekebalan terhadap semua injeksi atau keaslian/pemilik bukti. Masking teks tidak menyamarkan piksel gambar non-KTP. Tinjauan manusia tetap diperlukan.
@@ -108,7 +119,7 @@ Pada guardrail 22 Oktober, sapaan `halo` sempat menerima penolakan scope tetap. 
 - **Uji API aplikasi melalui ASGI pada 22 Oktober**: status pelapor → OCR KTP lokal → kontak → vision bukti chat → kronologi Sumopod dengan masking → lewati laporan polisi → vision bukti rekening → vision transfer → `FINAL_CONFIRMATION`, wizard tahap 5. `submitted:false`, tanpa request submit atau jawaban CAPTCHA. Tidak memakai respons provider tiruan.
 - Pengujian browser penuh tidak diulang untuk perubahan ini. Target seluruh intake di bawah 45 detik belum diukur.
 
-Hasil di bagian ini merupakan riwayat diagnosis. Kronologi saat ini tidak lagi dikirim ke Sumopod; uji live guardrail terbaru dicatat di atas.
+Hasil di bagian ini merupakan riwayat diagnosis; implementasi dan uji sintesis kronologi terbaru dicatat di atas.
 
 ## Regresi validasi OCR KTP
 
