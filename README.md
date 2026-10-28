@@ -1,6 +1,6 @@
 # Replika IASC lokal + Help Center OCR & Chat
 
-PoC FastAPI dengan replika lima tahap pelaporan IASC dan asisten pengisian bertahap yang dapat ditempel melalui iframe. LLM hanya mengekstrak JSON pelaporan; tidak menyediakan obrolan bebas. **Tidak mengirim laporan resmi, memverifikasi identitas nyata, atau memblokir rekening. Gunakan data dummy.**
+PoC FastAPI dengan replika lima tahap pelaporan IASC dan asisten pengisian bertahap yang dapat ditempel melalui iframe. LLM mengekstrak JSON pelaporan dan memilih FAQ terkurasi; tidak menyediakan obrolan bebas. **Tidak mengirim laporan resmi, memverifikasi identitas nyata, atau memblokir rekening. Gunakan data dummy.**
 
 UI mengikuti acuan halaman publik dan screenshot IASC yang diperiksa pada 20 Oktober 2026. Kontrak Pydantic lima tahap mengikuti spesifikasi pengguna; **belum diverifikasi terhadap backend resmi ASP.NET IASC**. Target pengisian di bawah 45 detik belum diukur dan bukan jaminan performa.
 
@@ -62,6 +62,20 @@ Jawaban tidak harus sama persis dengan format kolom: `320 ribu`, `1,5 juta`, `ja
 
 Formulir manual tetap tersedia bila AI gagal. **Simpan Simulasi Lokal** menyimpan metadata di localStorage browser dengan `SIM-…`, `simulated:true`, `submitted:false`; berkas asli tidak disimpan di sana. Isian aktif/file di memori tab hilang saat halaman dimuat ulang. Metadata tiket dapat dihapus melalui Cek Laporan. Tombol kirim laporan resmi dinonaktifkan.
 
+## FAQ: jawab lalu lanjutkan laporan
+
+`services/faq_grounding.py` menyimpan 12 FAQ bahasa Indonesia dengan ID, jawaban, kata kunci, state terkait, URL sumber, asal panduan, dan tanggal peninjauan. Sumber prosedur resmi diperiksa pada **28 Oktober 2026** melalui [portal IASC OJK](https://iasc.ojk.go.id/). Panduan aplikasi lokal—contoh bukti bank digital, batas/kompresi file, melewati unggahan LP, dan OCR lokal—ditandai terpisah dari prosedur resmi. Melapor ke polisi tetap diperlukan untuk jalur hukum; laporan IASC tidak menjamin dana kembali.
+
+Pencarian memakai token/kata kunci dan peningkatan relevansi tahap di memori, tanpa embedding, database vektor, dependensi atau model tambahan. Pertanyaan seperti **“Pakai bank digital, upload apa?”** dijawab lalu diakhiri dengan permintaan file/kolom aktif. FAQ atau penolakan tidak mengubah state, lampiran, isian, revisi, maupun `dom_patches`. Pertanyaan yang belum tercakup mendapat jawaban bahwa panduan terverifikasi belum tersedia.
+
+Pesan **“Nomor HP saya 081299887766 dan email budi@mail.com, apakah uang saya pasti kembali?”** mengisi kontak terlebih dahulu, menjawab bahwa pengembalian tidak dijamin, lalu meminta bukti chat. Pertanyaan tidak ikut disimpan ke kolom atau kronologi; pertanyaan/kalimat bersyarat yang diceritakan sebagai kejadian tetap bagian dari cerita. Nominal dan jam parsial juga dapat diberikan bersama pertanyaan; bagian tanggal/jam yang masih kurang tetap ditanyakan.
+
+Pada mode remote, LLM hanya memilih ID dari paling banyak dua FAQ yang ditemukan, melalui JSON dengan temperature **0,7**. Teks jawaban terkurasi dan pengingat langkah dirender server; model tidak dapat menambahkan janji/prosedur baru. Teks pengguna dimasking dan data formulir/pengingat privat tidak dikirim. Bila API gagal, JSON tidak valid, atau mode simulasi aktif, jawaban deterministik tetap tersedia. Pertanyaan di luar topik dan prompt injection ditolak sebelum API.
+
+Respons menambahkan `turn_intent` (`SLOT_INPUT`, `IASC_FAQ_QUESTION`, `MIXED_INPUT_AND_QUESTION`, `OUT_OF_CONTEXT`), `grounded_faq_ids`, `guardrail_triggered`, dan `faq_quick_asks`. Widget menampilkan badge panduan/refokus dan satu atau dua chip pertanyaan sesuai tahap; chip mengirim pertanyaan biasa, bukan aksi melanjutkan/submit. API lama juga menerima FAQ secara lokal, tanpa cloud.
+
+Untuk menambah FAQ, edit satu entri `IASC_FAQ_KNOWLEDGE_BASE`, sertakan sumber/provenance, kata kunci dan tanggal tinjauan, lalu tambahkan tes retrieval dan restart server. Perbarui `_unsafe`/aturan topik hanya bersama tes yang membedakan cerita penipuan dari permintaan di luar konteks. Pencocokan leksikal tetap dapat melewatkan variasi bahasa yang belum tercakup.
+
 ## Struktur proyek
 
 ```text
@@ -73,6 +87,7 @@ iasc-ai-intake/
 ├── services/
 │   ├── orchestrator.py            # State, sesi, delta patch, confidence
 │   ├── llm_gateway.py             # Gateway OpenAI-compatible dan simulasi
+│   ├── faq_grounding.py           # FAQ terkurasi, pencarian leksikal, answer-and-pivot
 │   ├── guardrails.py              # Allowlist tugas, scope, injection, pesan penolakan
 │   ├── ktp_ocr.py                 # OCR dan parser KTP sepenuhnya lokal
 │   ├── privacy.py                 # Pseudonim data pribadi sebelum API teks
@@ -153,13 +168,26 @@ CHAT_MODEL_NAME=deepseek-v3
 AI_RESPONSE_FORMAT=json_object
 ```
 
+Untuk MacBook M1 8 GB dengan Ollama yang sudah terpasang, siapkan `ollama pull qwen2.5:3b` dan jalankan layanan Ollama, lalu gunakan:
+
+```dotenv
+AI_MODE=remote
+AI_BASE_URL=http://127.0.0.1:11434/v1
+AI_API_KEY=
+CHAT_MODEL_NAME=qwen2.5:3b
+VISION_MODEL_NAME=qwen2.5:3b
+VISION_INPUT_MODE=ocr_text
+```
+
+`qwen2.5:3b` adalah model teks: bukti non-KTP dibaca Tesseract lokal sebelum ekstraksi teks, sehingga tidak mengirim input gambar ke model teks. KTP tetap memakai parser lokal. FAQ tidak menambahkan model, embedding, atau database ke RAM. Kecepatan dan konsumsi RAM pada perangkat M1 8 GB belum diukur; contoh ini tidak otomatis memasang/mengunduh model.
+
 Gateway tetap model-agnostic: kedua model memakai **satu `AI_BASE_URL`**; untuk on-premise, router vLLM/LiteLLM harus menyediakan alias dan kemampuan masing-masing. HTTP tanpa TLS hanya diterima pada localhost. Keyless localhost memerlukan `AI_MODE=remote` eksplisit. Konfigurasi on-premise belum diuji.
 
-Restart setelah mengganti konfigurasi. Model hanya mengekstrak slot; state, consent, validasi, dan tiket dikendalikan server. Key tetap di server dan `.env` tidak masuk Git.
+Restart setelah mengganti konfigurasi. Model mengekstrak slot atau memilih ID FAQ yang disediakan; state, consent, validasi, dan tiket dikendalikan server. Key tetap di server dan `.env` tidak masuk Git.
 
 ## Guardrail yang dapat diperbarui
 
-Aturan server berada di **`services/guardrails.py`**. `ALLOWED_LLM_TASKS` hanya berisi `extract_report_fields`, `extract_transfer_proof`, `extract_victim_account_proof`, dan `extract_chat_proof`; tugas lain menghasilkan `ValueError`. Tambahkan pola injeksi pada `_INJECTION`, aturan topik pada pemeriksaan scope, dan kasus regresi pada `tests/test_guardrails.py`, lalu jalankan pytest dan restart server. Mengubah system prompt saja tidak mengubah izin server.
+Aturan server berada di **`services/guardrails.py`**. `ALLOWED_LLM_TASKS` hanya berisi `extract_report_fields`, `extract_transfer_proof`, `extract_victim_account_proof`, dan `extract_chat_proof`; tugas lain menghasilkan `ValueError`. Tambahkan pola injeksi pada `_INJECTION`, aturan topik pada pemeriksaan scope, dan kasus regresi pada `tests/test_guardrails.py`, lalu jalankan pytest dan restart server. Pemilihan ID FAQ menggunakan jalur khusus `generate_grounded_faq_reply`, di luar empat tugas ekstraksi, dengan jawaban tetap dirender dari registry lokal. Mengubah system prompt saja tidak mengubah izin server.
 
 Input diperiksa sebelum pemrosesan state: maksimal 2.000 karakter, normalisasi Unicode, pembersihan karakter kontrol, deteksi instruksi/tag role/script, serta penolakan topik di luar pelaporan. Bantuan dan pertanyaan klarifikasi diarahkan ke template empatik lokal; jawaban singkat divalidasi terhadap kolom aktif. Cerita pada tahap kronologi memakai konteks tahap, sehingga tidak wajib menyebut kata “penipuan”. Deskripsi seperti “penipu berperan sebagai petugas bank” diperlakukan sebagai cerita, sedangkan perintah mengganti peran asisten tetap ditolak. Input terlalu panjang ditolak HTTP 422. Bantuan/penolakan mempertahankan data, revisi, consent, tiket, dan tahap laporan, tanpa patch baru.
 

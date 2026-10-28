@@ -23,7 +23,11 @@ ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env", override=False)
 
 from app import app  # Reuse the existing replica, assets and legacy draft API.
-from schemas import FileMetadata, LaporanIASC, to_indonesian_date
+from schemas import ChatTurnMetadata, FileMetadata, LaporanIASC, to_indonesian_date
+from services.faq_grounding import (
+    build_grounded_response_with_pivot, classify_user_turn_intent,
+    retrieve_faq_context, split_question_from_input,
+)
 from services.image_processor import ImageProcessingError, process_image, smart_file_reuse
 from services.ktp_ocr import extract_ktp_locally
 from services.natural_input import ParsedDateTime, parse_report_datetime
@@ -138,6 +142,27 @@ def commit_session(session, candidate):
 def chronology_context(session):
     return {"values": dict(flattened(session.data)),
             "evidence_facts": [fact for facts in session.evidence_facts.values() for fact in facts]}
+
+
+async def faq_turn(session, message, response=None, *, has_updates=False):
+    if response is None:
+        response = snapshot(session, simulated=getattr(session, "simulated_extraction", True),
+                            before=session.data, advance_state=False)
+    _, question = split_question_from_input(message)
+    matches = retrieve_faq_context(question or message, session.state)
+    intent = "MIXED_INPUT_AND_QUESTION" if has_updates or response["dom_patches"] else "IASC_FAQ_QUESTION"
+    answer = build_grounded_response_with_pivot(message, intent, matches, response["question"])
+    try:
+        if matches:
+            answer = await gateway().generate_grounded_faq_reply(
+                message, matches, response["question"], dict(flattened(session.data)))
+    except HTTPException:
+        pass
+    response.update(answer)
+    response.update(ChatTurnMetadata(
+        turn_intent=intent, grounded_faq_ids=answer["grounded_faq_ids"],
+        faq_quick_asks=response["faq_quick_asks"]).model_dump(mode="json"))
+    return response
 
 
 async def refresh_chronology(session):
@@ -305,16 +330,28 @@ async def chat_v1(session_id: str, body: ChatInput):
     session = session_for(session_id)
     async with session.lock:
         rate_limit(session)
+        faq_message = ""
         try:
             text = sanitize_user_text(body.text) if body.text else ""
             if text and (detect_prompt_injection(body.text) or detect_prompt_injection(text) or is_clearly_out_of_scope(text)):
+                raise GuardrailViolation()
+            continuation = text.casefold().strip(" .!?") in {"lanjut", "lanjutkan", "boleh lanjut", "sudah cukup"}
+            clarification = re.search(r"\b(?:maksudnya|yang mana|yang dimaksud)\b|^apa itu rekening\W*$", text, re.I)
+            if clarification and is_reporting_help(text) and not (body.values or body.action or body.confirm):
+                return reporting_guidance(session, text, simulated=getattr(session, "simulated_extraction", True))
+            intent = classify_user_turn_intent(text, session.state, False) if text and not continuation else "SLOT_INPUT"
+            if intent == "OUT_OF_CONTEXT":
                 raise GuardrailViolation()
             action = check_user_input(body.action, allow_scalar=True) if body.action else ""
             for path in body.values:
                 check_user_input(path, allow_scalar=True)
             values = {path: check_user_input(value, allow_scalar=not path.endswith(".kronologi_kejadian_penipuan"), allow_report_context=path.endswith(".kronologi_kejadian_penipuan")) if isinstance(value, str) else value for path, value in body.values.items()}
+            if intent == "IASC_FAQ_QUESTION":
+                slot_text, _ = split_question_from_input(text)
+                if not (slot_text or values):
+                    return await faq_turn(session, text)
+                faq_message, text = text, slot_text
             # Clarification belongs to the local workflow, never to an account/name slot.
-            continuation = text.casefold().strip(" .!?") in {"lanjut", "lanjutkan", "boleh lanjut", "sudah cukup"}
             if text and not body.values and not body.action and not body.confirm:
                 if continuation and session.state in {IntakeState.CHAT_MORE, IntakeState.TRANSFER_MORE}:
                     action = "continue"
@@ -437,9 +474,17 @@ async def chat_v1(session_id: str, body: ChatInput):
         except GuardrailViolation:
             return guardrail_refusal(session, simulated=getattr(session, "simulated_extraction", True))
         except GatewayError as exc:
+            if faq_message:
+                return await faq_turn(session, faq_message)
             raise HTTPException(422, str(exc)) from None
+        except HTTPException as exc:
+            if faq_message and exc.status_code in {409, 422}:
+                return await faq_turn(session, faq_message)
+            raise
         advance(candidate)
         response = view(candidate, before)
+        if faq_message:
+            response = await faq_turn(candidate, faq_message, response, has_updates=candidate.revision != session.revision)
         commit_session(session, candidate)
         return response
 

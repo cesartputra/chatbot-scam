@@ -19,6 +19,13 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 from services.image_processor import ImageProcessingError, local_ocr_text
 from services.guardrails import GuardrailViolation, REFUSAL_MESSAGE, check_user_input, is_within_reporting_scope, looks_like_ktp
+from services.guardrails import sanitize_user_text
+from services.faq_grounding import (
+    build_grounded_response_with_pivot, classify_user_turn_intent,
+    contextual_faq_chips, retrieve_faq_context, split_question_from_input,
+)
+from schemas import ChatTurnMetadata
+from services.llm_gateway import EMAIL_SLOT, PHONE_SLOT, GatewayError, extract_contact_slots
 
 ROOT = Path(__file__).resolve().parent
 JAKARTA = timezone(timedelta(hours=7))
@@ -137,9 +144,15 @@ def question(data):
 
 
 def state(session):
+    missing = [key for key in REQUIRED if session["data"].get(key) is None]
+    stage = FIELD_MAP[missing[0]][2] if missing else 5
+    current = {1: "PELAPOR_DETAILS", 2: "TERLAPOR_DETAILS", 3: "CHRONOLOGY_INPUT",
+               4: "ACCOUNT_DETAILS", 5: "FINAL_CONFIRMATION"}[stage]
     return {
+        **ChatTurnMetadata(faq_quick_asks=contextual_faq_chips(current)).model_dump(mode="json"),
+        "current_state": current, "dom_patches": [],
         "data": session["data"], "sources": session["sources"], "evidence": session["evidence"],
-        "missing": [key for key in REQUIRED if session["data"].get(key) is None],
+        "missing": missing,
         "question": question(session["data"]), "submission_enabled": False,
     }
 
@@ -280,10 +293,41 @@ class Message(BaseModel):
 async def message(token: str, message: Message):
     session = get_session(token)
     missing = [key for key in REQUIRED if session["data"].get(key) is None]
+    response = state(session)
+    original = message.text
     try:
-        text = check_user_input(message.text, allow_scalar=bool(missing) and missing[0] != "kronologi")
+        text = sanitize_user_text(original)
+        intent = classify_user_turn_intent(original, response["current_state"], False)
+        if intent == "OUT_OF_CONTEXT":
+            raise GuardrailViolation()
+        if intent == "IASC_FAQ_QUESTION":
+            slot_text, faq_question = split_question_from_input(text)
+            if slot_text and missing:
+                key = missing[0]
+                try:
+                    value = check_user_input(slot_text, allow_scalar=key != "kronologi")
+                    if re.search(r"\b(?:hp|telepon|email)\b|@", value, re.I):
+                        names = {PHONE_SLOT: "pelapor_telepon", EMAIL_SLOT: "pelapor_email"}
+                        updates = {names[item.field]: item.value for item in extract_contact_slots(value) if names[item.field] in missing}
+                    else:
+                        updates = {key: value}
+                    before = dict(session["data"])
+                    apply_values(session, updates, "chat")
+                    response = state(session)
+                    response["dom_patches"] = [{"op": "set", "path": key, "value": session["data"][key], "step": FIELD_MAP[key][2]}
+                                               for key in updates if session["data"][key] != before[key]]
+                    if response["dom_patches"]:
+                        intent = "MIXED_INPUT_AND_QUESTION"
+                except (GuardrailViolation, GatewayError, HTTPException):
+                    pass
+            answer = build_grounded_response_with_pivot(
+                original, intent, retrieve_faq_context(faq_question, response["current_state"]), question(session["data"]))
+            return {**response, **answer}
+        text = check_user_input(text, allow_scalar=bool(missing) and missing[0] != "kronologi")
     except GuardrailViolation:
-        return {**state(session), "reply": REFUSAL_MESSAGE, "question": REFUSAL_MESSAGE}
+        reply = REFUSAL_MESSAGE + "\n\n" + question(session["data"])
+        return {**response, "turn_intent": "OUT_OF_CONTEXT", "guardrail_triggered": True,
+                "assistant_message": reply, "reply": reply, "question": reply}
     if not missing:
         return {**state(session), "reply": "Data inti sudah lengkap. Gunakan tombol edit pada ringkasan untuk memperbaiki isian."}
     apply_values(session, {missing[0]: text}, "chat")

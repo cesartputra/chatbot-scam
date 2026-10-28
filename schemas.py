@@ -99,6 +99,18 @@ class ContractModel(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_default=True, str_strip_whitespace=True, allow_inf_nan=False)
 
 
+class FAQQuickAsk(ContractModel):
+    label: str = Field(min_length=1, max_length=200)
+    text: str = Field(min_length=1, max_length=200)
+
+
+class ChatTurnMetadata(ContractModel):
+    turn_intent: Literal["SLOT_INPUT", "IASC_FAQ_QUESTION", "MIXED_INPUT_AND_QUESTION", "OUT_OF_CONTEXT"] = "SLOT_INPUT"
+    grounded_faq_ids: list[str] = Field(default_factory=list, max_length=2)
+    guardrail_triggered: StrictBool = False
+    faq_quick_asks: list[FAQQuickAsk] = Field(default_factory=list, max_length=2)
+
+
 class LLMExtractionSlot(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
     field: str = Field(min_length=1, max_length=200)

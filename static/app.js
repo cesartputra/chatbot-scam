@@ -31,10 +31,16 @@ async function work(action, status = 'Sebentar, sedang memproses…') {
     if (draft) render();
   }
 }
-function bubble(text, kind = 'assistant') {
+function bubble(text, kind = 'assistant', metadata = {}) {
   if (kind === 'user') $('chat').querySelector('.welcome')?.remove();
   const div = document.createElement('div'); div.className = 'bubble ' + kind;
-  div.textContent = text; $('chat').append(div); $('chat').scrollTop = $('chat').scrollHeight;
+  if (kind === 'assistant') {
+    const labels = [];
+    if (Array.isArray(metadata.grounded_faq_ids) && metadata.grounded_faq_ids.length) labels.push('📘 Panduan Resmi IASC OJK');
+    if (metadata.guardrail_triggered === true) labels.push('🛡️ Fokus Pelaporan IASC');
+    for (const label of labels) { const badge = document.createElement('div'); badge.className = 'review-notice'; badge.textContent = label; div.append(badge); }
+  }
+  div.append(document.createTextNode(text)); $('chat').append(div); $('chat').scrollTop = $('chat').scrollHeight;
 }
 function welcome() {
   const container = document.createElement('div'); container.className = 'bubble welcome';
@@ -97,6 +103,11 @@ function render() {
     }
     $('message').placeholder = field.key === 'waktu_transaksi' ? 'Contoh: 2026-10-19 10:00' : 'Tulis jawaban Anda…';
   }
+  const faqs = Array.isArray(draft.faq_quick_asks) ? draft.faq_quick_asks : [];
+  for (const faq of faqs.filter(item => typeof item?.label === 'string' && typeof item.text === 'string' && item.text.trim()).slice(0,2)) {
+    const button = document.createElement('button'); button.type = 'button'; button.textContent = faq.label;
+    button.disabled = busy; button.addEventListener('click', () => sendMessage(faq.text)); $('quick-replies').append(button);
+  }
   $('evidence-count').textContent = draft.evidence ? '1' : '0';
   $('evidence-empty').hidden = !!draft.evidence;
   $('evidence-result').hidden = !draft.evidence;
@@ -107,7 +118,7 @@ async function sendMessage(text) {
   text = text.trim(); if (!text) return;
   await work(async () => {
     const next = await api(`sessions/${sessionId}/messages`, jsonOptions('POST', { text }));
-    bubble(text, 'user'); adopt(next); bubble(next.reply); $('message').value = '';
+    bubble(text, 'user'); adopt(next); bubble(next.reply, 'assistant', next); $('message').value = '';
   });
 }
 async function upload(file, name = file.name) {
@@ -117,7 +128,7 @@ async function upload(file, name = file.name) {
     if (!['image/png','image/jpeg','image/webp'].includes(file.type)) throw new Error('Pilih gambar PNG, JPG, atau WebP.');
     const next = await api(`sessions/${sessionId}/evidence`, {method:'POST',headers:{'Content-Type':file.type},body:file});
     if (imageUrl) URL.revokeObjectURL(imageUrl); imageUrl = URL.createObjectURL(file); evidenceFile = file; $('evidence-preview').src = imageUrl;
-    bubble('▧ ' + name, 'user'); adopt(next); bubble(next.reply); selectTab('data');
+    bubble('▧ ' + name, 'user'); adopt(next); bubble(next.reply, 'assistant', next); selectTab('data');
   }, 'Membaca bukti transfer…');
   $('evidence-input').value = '';
 }

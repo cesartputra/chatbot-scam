@@ -209,7 +209,9 @@ class GuardrailWorkflowTests(unittest.TestCase):
                 with self.subTest(path=path):
                     response = method(url + path, json=payload)
                     self.assertEqual(response.status_code, 200, response.text)
-                    self.assertEqual(response.json()["reply"], REFUSAL_MESSAGE)
+                    self.assertTrue(response.json()["reply"].startswith(REFUSAL_MESSAGE))
+                    if path == "/messages":
+                        self.assertTrue(response.json()["reply"].endswith(legacy.question(before)))
                     self.assertEqual(response.json()["data"], before)
             for text in ("pelapor dummy", "pelapor@example.com", "08000000001", "0000000000000000"):
                 self.assertEqual(self.client.post(url + "/messages", json={"text": text}).status_code, 200)

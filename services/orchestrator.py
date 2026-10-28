@@ -13,12 +13,13 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ValidationError
 
 from schemas import (
-    MONTHS, FileMetadata, LaporanIASC, Tahap1InformasiPihakPelapor,
+    MONTHS, ChatTurnMetadata, FileMetadata, LaporanIASC, Tahap1InformasiPihakPelapor,
     Tahap2InformasiPihakTerlapor, Tahap3InformasiKejadian,
     Tahap4InformasiTransaksi, validate_slot_value,
 )
 from services.normalizer import normalize_bank, normalize_location, normalize_media
 from services.guardrails import REFUSAL_MESSAGE
+from services.faq_grounding import contextual_faq_chips
 
 
 class IntakeState(StrEnum):
@@ -445,6 +446,7 @@ def snapshot(session, *, simulated=True, before=None, advance_state=True):
     if missing and missing[0]["reason"] == "low_confidence":
         replies = [{"label": "Sudah sesuai", "value": "confirm_value"}]
     return {
+        **ChatTurnMetadata(faq_quick_asks=contextual_faq_chips(session.state)).model_dump(mode="json"),
         "session_id": session.session_id, "state": session.state, "current_state": session.state,
         "active_wizard_step": TURN_STEPS[session.state], "expected_upload_type": UPLOAD_STATES.get(session.state),
         "assistant_message": message, "reply": message, "question": message, "quick_replies": replies,
@@ -466,7 +468,8 @@ def guardrail_refusal(session, *, simulated=True):
     """Policy refusals describe the current draft without advancing or mutating it."""
     response = snapshot(session, simulated=simulated, before=session.data, advance_state=False)
     message = REFUSAL_MESSAGE + "\n\n" + response["question"]
-    response.update(assistant_message=message, reply=message, question=message)
+    response.update(assistant_message=message, reply=message, question=message,
+                    turn_intent="OUT_OF_CONTEXT", guardrail_triggered=True)
     return response
 
 

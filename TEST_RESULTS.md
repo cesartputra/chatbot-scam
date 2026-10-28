@@ -1,4 +1,4 @@
-# Hasil verifikasi PoC — 24 Oktober 2026
+# Hasil verifikasi PoC — 28 Oktober 2026
 
 Entry point `main:app`, Python 3.14.4 pada macOS. Uji cloud hanya memakai fixture dummy. Contoh KTP pengguna diproses lokal; gambar/nilai identitas tidak disimpan dalam repository. Tidak ada pengiriman laporan ke IASC atau tindakan bank.
 
@@ -6,8 +6,8 @@ Entry point `main:app`, Python 3.14.4 pada macOS. Uji cloud hanya memakai fixtur
 
 | Suite | Hasil |
 | --- | --- |
-| Python: `.venv/bin/python -m pytest -q` | **234 lulus, 522 subtest lulus** |
-| JavaScript: `node --test tests/*.test.mjs` | **27 lulus, 0 gagal** |
+| Python: `.venv/bin/python -m pytest -q` | **345 lulus, 564 subtest lulus** |
+| JavaScript: `node --test tests/*.test.mjs` | **31 lulus, 0 gagal** |
 
 Python meliputi:
 
@@ -31,6 +31,20 @@ Python meliputi:
 - Jawaban pribadi yang jelas tetap lokal, termasuk nama huruf kecil tanpa label. Kalimat yang memerlukan interpretasi memakai token masking; model hanya boleh memilih tepat satu token yang diterbitkan, tanpa menambah nama/nomor. API chat lama tetap lokal.
 
 Node meliputi validasi fase/modal, dokumen perwakilan, parsing nominal dan tanggal, mapping payload lama, shared object URL, serta mapping progresif untuk radio/dropdown/tanggal/file dan koleksi bersarang. Cakupan progresif juga meliputi path/revisi tidak sah, sesi lama, Decimal tanpa kehilangan presisi, konflik manual, reset isian AI saat sesi baru, dan gate hasil simulasi untuk consent/CAPTCHA. Tes tidak menghubungi IASC.
+
+## Micro-RAG FAQ dan answer-and-pivot — 28 Oktober
+
+- Registry 12 FAQ terkurasi ditinjau terhadap halaman publik [IASC OJK](https://iasc.ojk.go.id/) pada 28 Oktober 2026. Entri menyimpan asal panduan dan membedakan ketentuan resmi dari perilaku lokal: kewajiban LP untuk jalur hukum, Surat Kuasa bagi perwakilan, kemungkinan laporan terpisah untuk rekening terlapor berbeda, serta tidak ada jaminan uang kembali. Panduan bukti bank digital, batas file, kompresi dan OCR/e-KYC simulasi diatribusikan pada aplikasi.
+- Registry JSON sekitar **8.210 byte**, di memori, dengan pencarian token/alias dan peningkatan relevansi state; tidak menambah model, embedding, database atau dependensi.
+- Tes baru gagal sebelum integrasi karena metadata dan alur FAQ belum tersedia, lalu lulus untuk preservasi semua 17 state, file/slot aktif, data, confidence, sumber, revisi, consent, tiket, CAPTCHA dan komponen tanggal/jam sementara. FAQ/penolakan mengembalikan `dom_patches:[]`; aksi continue/skip/confirm yang disisipkan ke pertanyaan murni tidak dijalankan pada spotcheck review.
+- Pesan campuran kontak sebelum/sesudah pertanyaan mengisi field dulu, menyalin konfirmasi kontak, menjawab FAQ dan berpindah ke unggahan chat. Pesan nominal, jam parsial, kronologi dan koreksi manual bersama FAQ juga diuji. Nilai contoh dalam pertanyaan tidak diekstrak; input ambigu/gagal tidak menghapus draft. Pertanyaan di luar KB tidak mendapat jawaban karangan atau FAQ dari kata kunci pada bagian deklarasi data.
+- Review menemukan dan memperbaiki kronologi yang terpotong oleh kata `kalau`/pertanyaan yang diceritakan, kontak legacy yang sempat masuk ke kolom nama, serta pemblokiran cerita penipuan kripto. Regresi dilihat gagal sebelum perbaikan. Permintaan rekomendasi investasi, coding, resep, politik dan prompt injection tetap ditolak sebelum panggilan model.
+- Gateway FAQ hanya menerima JSON berisi satu/dua ID dari hasil retrieval; teks jawaban selalu dari registry dan pivot dirender server. HTTP tiruan menguji token masking, tidak terkirimnya form/pivot privat, timeout/error/malformed JSON, ID/field palsu, tool calls, output injeksi dan fallback simulasi. Allowlist empat tugas ekstraksi tetap terpisah dari pemilihan FAQ terbatas.
+- **Sumopod nyata:** satu panggilan FAQ mendapat HTTP 200 dan JSON pilihan `faq_jaminan_uang_kembali` yang valid; alur status → OCR KTP dummy lokal → pesan campuran kontak/FAQ berhasil ke `CHAT_EVIDENCE_UPLOAD`, empat patch kontak, dan `submitted:false`. Pesan injeksi berikutnya ditolak tanpa API atau perubahan draft. Sesi tes dihapus, tanpa CAPTCHA/S&K/submit.
+- **Browser lokal:** pada server simulasi terpisah, chip FAQ dapat diklik tanpa maju state; KTP dummy mengisi 12 field lokal; pesan kontak + pertanyaan mengisi empat field, memindahkan replika ke Tahap 2 dan menampilkan badge panduan, jawaban tanpa jaminan uang kembali, pivot unggahan chat, serta chip FAQ baru. Screenshot disimpan di `/tmp/iasc-faq-demo.png`; tidak ada klik submit/CAPTCHA.
+- DOM tests mencakup badge/chip widget dan UI legacy, penyimpanan bubble lama, textContent yang aman, serta pertanyaan chip yang tidak dikirim sebagai aksi state.
+- Konfigurasi keyless Ollama localhost `qwen2.5:3b` diverifikasi melalui constructor dan HTTP tiruan. Contoh memakai `VISION_INPUT_MODE=ocr_text` karena model teks tidak menerima gambar. Ollama nyata/performa RAM dan latensi MacBook M1 8 GB belum diukur. Browser alur penuh lima tahap tidak diulang pada perubahan ini; regresi alur penuh tercakup suite.
+- Satu warning Starlette/httpx deprecation yang sudah ada tetap muncul; seluruh tes lulus. Pemeriksaan pola/lexical tetap heuristik dan dapat memerlukan penambahan variasi bahasa.
 
 ## Kronologi AI dan temperature 0,7 — 24 Oktober
 
